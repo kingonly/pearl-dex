@@ -103,6 +103,30 @@ export function computeBondForfeitHeight(p: {
 }
 
 /**
+ * Validate the bond's forfeit height vs the source timeout. The bond lives on the SOURCE (quote)
+ * chain, so this is a same-chain height comparison: the counterparty's forfeit-claim MUST become
+ * spendable strictly before the bond owner can refund the source leg. Otherwise a walking taker
+ * could refund source AND then safely reveal the preimage to reclaim the bond — escaping the
+ * penalty and re-opening the free option.
+ *
+ * NOTE: `computeBondForfeitHeight` and `computeSwapTimeouts` produce EQUAL heights when the bond is
+ * on the source chain and both use the same margin — so this strict-`<` check is load-bearing, not
+ * cosmetic. `proposeTimeouts` clamps to `sourceTimeoutHeight - 1`; this asserts the invariant for
+ * any timeouts the executor is handed (it trusts no one and re-checks at construction).
+ */
+export function assertSafeBondTimeout(p: {
+  bondForfeitHeight: number;
+  sourceTimeoutHeight: number;
+}): void {
+  if (p.bondForfeitHeight >= p.sourceTimeoutHeight) {
+    throw new Error(
+      `unsafe bond timelock: forfeit height ${p.bondForfeitHeight} must be strictly before the ` +
+        `source timeout ${p.sourceTimeoutHeight}`,
+    );
+  }
+}
+
+/**
  * Validate (in wall-clock, from current heights) that the source refund is sufficiently
  * later than the dest refund. Use on any timeouts before locking funds — including ones a
  * counterparty proposes. Throws if unsafe.

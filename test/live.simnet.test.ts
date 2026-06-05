@@ -7,6 +7,7 @@ import { pearlSimnet, pearlTestnet } from '../src/common/index.js';
 import { PearlClient, PEARL_TIMING } from '../src/settlement/index.js';
 import { OrderBook, RelayServer, MemorySwapStore, type Pair } from '../src/coordination/index.js';
 import { SwapClient, ReferenceWallet } from '../src/client/index.js';
+import { LocalSigner } from '../src/signer/index.js';
 
 /**
  * LIVE on-chain proof of the whole pipe against two real pearld simnet nodes (real RPC, real
@@ -91,7 +92,7 @@ describe.skipIf(!online)('LIVE: two-pearld-node cross-chain swap via the full pi
       new SwapClient({
         connection: relay.connect(hx(p.idXonly)),
         identityPrivateKey: p.id,
-        swapPrivateKey: p.swap,
+        swapSigner: new LocalSigner(p.swap),
         wallet,
         source: node1,
         dest: node2,

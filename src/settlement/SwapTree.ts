@@ -1,17 +1,26 @@
 import { randomBytes } from 'node:crypto';
-import { Address, OutScript, Transaction } from '@scure/btc-signer';
+import { Address, OutScript, SigHash, Transaction } from '@scure/btc-signer';
 import type { BTC_NETWORK } from '@scure/btc-signer/utils.js';
 import { sha256, taprootTweakPubkey } from '@scure/btc-signer/utils.js';
 import {
-  constructClaimTransaction,
-  constructRefundTransaction,
   detectPreimage,
   Musig,
-  OutputType,
   reverseSwapTree,
   TaprootUtils,
   type Types,
 } from 'boltz-core';
+import type { Signer } from '../signer/index.js';
+
+/** Signal RBF (BIP-125) so an unconfirmed claim/refund can be fee-bumped before its deadline. */
+const RBF_SEQUENCE = 0xfffffffd;
+/** Minimum spendable output; anything smaller is folded into the miner fee rather than created. */
+export const DEFAULT_DUST_SAT = 330n;
+
+/** An extra output to attach to a spend (e.g. the operator fee on the taker's dest claim). */
+export interface SpendOutput {
+  script: Uint8Array;
+  amountSat: bigint;
+}
 
 /**
  * One leg of a chain swap: a P2TR lockup whose key-path is a Musig2 aggregate of the two
@@ -103,62 +112,128 @@ export interface LockupUtxo {
 }
 
 /**
+ * Build and sign a single-input taproot SCRIPT-PATH spend of a swap leg, THROUGH the Signer seam.
+ *
+ * We no longer hand a private key to boltz-core's `constructClaimTransaction`. Instead we assemble
+ * the tx ourselves and obtain the one signature from a `Signer` (a held key, or a remote/Privy
+ * signer that only signs a 32-byte hash). This is what lets a browser user sign claims without the
+ * app ever holding the key. The witness is the same boltz produces: `[sig, preimage?, leaf, control]`.
+ *
+ *   - claim  (isRefund=false): witness includes the preimage; lockTime = 0 (claim leaf has no CLTV).
+ *   - refund (isRefund=true):  no preimage; lockTime = timeout (the refund leaf's CLTV).
+ *
+ * `extraOutputs` (claim only) are appended after the primary payout — used to pay the operator fee
+ * out of the taker's received amount. The primary payout receives `input - minerFee - Σextra`; if
+ * that would fall below dust the spend is refused rather than creating a negative/unspendable output.
+ */
+async function buildScriptPathSpend(args: {
+  leg: SwapLeg;
+  utxo: LockupUtxo;
+  signer: Signer;
+  isRefund: boolean;
+  preimage?: Uint8Array;
+  lockTime: number;
+  destinationScript: Uint8Array;
+  feeSat: bigint;
+  extraOutputs?: SpendOutput[];
+  dustSat?: bigint;
+}): Promise<Transaction> {
+  const tapLeaf = args.isRefund ? args.leg.tree.refundLeaf : args.leg.tree.claimLeaf;
+  const extra = args.extraOutputs ?? [];
+  const extraTotal = extra.reduce((acc, o) => acc + o.amountSat, 0n);
+  const dust = args.dustSat ?? DEFAULT_DUST_SAT;
+  const payout = args.utxo.amountSat - args.feeSat - extraTotal;
+  if (payout < dust) {
+    throw new Error(
+      `output underflow: input ${args.utxo.amountSat} - minerFee ${args.feeSat} - extra ${extraTotal} ` +
+        `= ${payout} < dust ${dust} (raise the locked amount or lower the fee)`,
+    );
+  }
+
+  const tx = new Transaction({ version: 2, lockTime: args.lockTime, allowUnknownOutputs: true });
+  tx.addOutput({ amount: payout, script: args.destinationScript });
+  for (const o of extra) tx.addOutput({ amount: o.amountSat, script: o.script });
+  tx.addInput({ txid: args.utxo.txid, index: args.utxo.vout, sequence: RBF_SEQUENCE });
+
+  // Taproot script-path sighash over the single input, committing to the leaf being satisfied.
+  const sigHash = tx.preimageWitnessV1(
+    0,
+    [args.leg.outputScript],
+    SigHash.DEFAULT,
+    [args.utxo.amountSat],
+    undefined,
+    tapLeaf.output,
+    tapLeaf.version,
+  );
+  const signature = await args.signer.signSchnorr(sigHash);
+
+  const witness: Uint8Array[] = [signature];
+  if (!args.isRefund) witness.push(args.preimage as Uint8Array);
+  witness.push(tapLeaf.output);
+  witness.push(
+    TaprootUtils.createControlBlock(
+      TaprootUtils.taprootHashTree(args.leg.tree.tree),
+      tapLeaf,
+      args.leg.internalKey,
+    ),
+  );
+  tx.updateInput(0, { finalScriptWitness: witness });
+  return tx;
+}
+
+/**
  * Script-path claim transaction: spend the lockup by revealing the preimage. Used by the
  * recipient to claim a leg, and by the bond owner to reclaim a bond. Signals RBF so we can
- * fee-bump before the timeout.
+ * fee-bump before the timeout. Signs through the `Signer` seam (never holds the key).
+ *
+ * `extraOutputs` attaches additional payments (the operator fee output on the taker's dest claim).
  */
 export function buildClaimTx(args: {
   leg: SwapLeg;
   utxo: LockupUtxo;
-  claimPrivateKey: Uint8Array;
+  signer: Signer;
   preimage: Uint8Array;
   destinationScript: Uint8Array;
   feeSat: bigint;
-}): Transaction {
-  const details: Types.ClaimDetails = {
-    type: OutputType.Taproot,
-    transactionId: args.utxo.txid,
-    vout: args.utxo.vout,
-    script: args.leg.outputScript,
-    amount: args.utxo.amountSat,
-    privateKey: args.claimPrivateKey,
+  extraOutputs?: SpendOutput[];
+  dustSat?: bigint;
+}): Promise<Transaction> {
+  return buildScriptPathSpend({
+    leg: args.leg,
+    utxo: args.utxo,
+    signer: args.signer,
+    isRefund: false,
     preimage: args.preimage,
-    swapTree: args.leg.tree,
-    internalKey: args.leg.internalKey,
-    cooperative: false,
-  };
-  return constructClaimTransaction([details], args.destinationScript, args.feeSat, true);
+    lockTime: 0,
+    destinationScript: args.destinationScript,
+    feeSat: args.feeSat,
+    extraOutputs: args.extraOutputs,
+    dustSat: args.dustSat,
+  });
 }
 
 /**
  * Script-path refund transaction: spend the lockup after `timeoutBlockHeight`. Used by the
  * party who locked funds when the swap stalls, and by the counterparty to claim a forfeited
- * bond after its timeout.
+ * bond after its timeout. Signs through the `Signer` seam.
  */
 export function buildRefundTx(args: {
   leg: SwapLeg;
   utxo: LockupUtxo;
-  refundPrivateKey: Uint8Array;
+  signer: Signer;
   timeoutBlockHeight: number;
   destinationScript: Uint8Array;
   feeSat: bigint;
-}): Transaction {
-  const details: Types.RefundDetails = {
-    type: OutputType.Taproot,
-    transactionId: args.utxo.txid,
-    vout: args.utxo.vout,
-    script: args.leg.outputScript,
-    amount: args.utxo.amountSat,
-    privateKey: args.refundPrivateKey,
-    swapTree: args.leg.tree,
-    internalKey: args.leg.internalKey,
-    cooperative: false,
-  };
-  return constructRefundTransaction(
-    [details],
-    args.destinationScript,
-    args.timeoutBlockHeight,
-    args.feeSat,
-    true,
-  );
+  dustSat?: bigint;
+}): Promise<Transaction> {
+  return buildScriptPathSpend({
+    leg: args.leg,
+    utxo: args.utxo,
+    signer: args.signer,
+    isRefund: true,
+    lockTime: args.timeoutBlockHeight,
+    destinationScript: args.destinationScript,
+    feeSat: args.feeSat,
+    dustSat: args.dustSat,
+  });
 }

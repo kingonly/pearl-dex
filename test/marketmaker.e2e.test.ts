@@ -5,6 +5,7 @@ import { PEARL_TIMING, SIGNET_TIMING } from '../src/settlement/index.js';
 import { OrderBook, RelayServer, MemorySwapStore, type Pair } from '../src/coordination/index.js';
 import { SwapClient, ReferenceWallet, type SwapClientConfig } from '../src/client/index.js';
 import { MarketMaker, SpreadPolicy } from '../src/lp/index.js';
+import { LocalSigner } from '../src/signer/index.js';
 import { ScriptedChainClient } from './helpers/ScriptedChain.js';
 
 const PRL_BTC: Pair = { base: 'PRL', quote: 'BTC' };
@@ -50,7 +51,7 @@ describe('MarketMaker — LP provides liquidity so a lone taker fills', () => {
     const lpClient = new SwapClient({
       connection: relay.connect(hx(lp.idXonly)),
       identityPrivateKey: lp.id,
-      swapPrivateKey: lp.swap,
+      swapSigner: new LocalSigner(lp.swap),
       wallet: lpWallet,
       source: btc,
       dest: prl,
@@ -76,7 +77,7 @@ describe('MarketMaker — LP provides liquidity so a lone taker fills', () => {
     const takerClient = new SwapClient({
       connection: relay.connect(hx(taker.idXonly)),
       identityPrivateKey: taker.id,
-      swapPrivateKey: taker.swap,
+      swapSigner: new LocalSigner(taker.swap),
       wallet: takerWallet,
       source: btc,
       dest: prl,

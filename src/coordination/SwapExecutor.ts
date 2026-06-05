@@ -1,10 +1,11 @@
-import { pubECDSA } from '@scure/btc-signer/utils.js';
 import type { BTC_NETWORK } from '@scure/btc-signer/utils.js';
 import { networkForTag, tagForNetwork, type NetworkTag } from '../common/networks.js';
+import type { Signer } from '../signer/index.js';
 import type { ChainClient, UtxoRef } from '../settlement/ChainClient.js';
 import { buildSwapPlan, type SwapPlan } from '../settlement/SwapPlan.js';
-import { buildClaimTx, buildRefundTx, extractPreimage } from '../settlement/SwapTree.js';
+import { buildClaimTx, buildRefundTx, extractPreimage, type SpendOutput } from '../settlement/SwapTree.js';
 import { buildBondReclaimTx, buildBondForfeitTx } from '../settlement/Bond.js';
+import { assertSafeBondTimeout } from '../settlement/Timelocks.js';
 import {
   type SwapRecord,
   type SwapStore,
@@ -85,8 +86,12 @@ export interface SwapExecutorDeps {
   dest: ChainClient;
   bond?: ChainClient;
   wallet: SwapWallet;
-  /** this party's swap private key (its pubkey must match its role's key in the params). */
-  swapPrivateKey: Uint8Array;
+  /**
+   * This party's swap signer — authority over its claim/refund/bond spends, through the Signer
+   * seam (a held key, or a remote/Privy signer). Its pubkey must match this role's key in the
+   * params. It is NOT custody: funds always pay out to the wallet's payoutScript, never to the signer.
+   */
+  swapSigner: Signer;
   policy?: ExecutorPolicy;
   log?: (msg: string) => void;
 }
@@ -167,12 +172,20 @@ export class SwapExecutor {
     assertNet(this.dst, this.dstNet, 'dest');
     assertNet(this.bnd, this.bndNet, 'bond');
 
-    // The executor's swap key must be this role's key in the params, or it can't sign.
-    const myPub = Buffer.from(pubECDSA(deps.swapPrivateKey, true)).toString('hex');
+    // The executor's swap signer must control this role's key in the params, or it can't sign.
+    const myPub = Buffer.from(deps.swapSigner.publicKey()).toString('hex');
     const expect = record.role === 'taker' ? pa.takerPubHex : pa.makerPubHex;
     if (myPub !== expect) {
-      throw new Error(`swapPrivateKey does not match the ${record.role} pubkey in the swap params`);
+      throw new Error(`swapSigner does not match the ${record.role} pubkey in the swap params`);
     }
+
+    // Defense in depth: the bond's forfeit height MUST be strictly before the source can refund,
+    // or a taker could refund source and still reclaim the bond (escaping the walk penalty). The
+    // handshake already validates this, but the executor trusts no one and re-checks its params.
+    assertSafeBondTimeout({
+      bondForfeitHeight: pa.bondForfeitHeight,
+      sourceTimeoutHeight: pa.sourceTimeoutHeight,
+    });
 
     this.plan = buildSwapPlan({
       preimageHash: hex(pa.preimageHashHex),
@@ -277,33 +290,49 @@ export class SwapExecutor {
           await this.advance('aborting');
           return;
         }
-        // Claim the dest leg, revealing the preimage. Must confirm before destTimeoutHeight.
+        // Claim the dest leg, revealing the preimage. Must confirm before destTimeoutHeight, else
+        // the maker can refund dest out from under us. The operator fee rides as an extra output on
+        // THIS claim (collected only on consummation — no fill, no fee), borne by the taker.
         const lk = r.lockups.dest!;
-        await this.broadcastConfirmed(this.dst, 'dest_claim', (feeSat) =>
-          buildClaimTx({
-            leg: this.plan.destLeg,
-            utxo: { txid: lk.txid, vout: lk.vout, amountSat: sat(lk.amountSat) },
-            claimPrivateKey: this.deps.swapPrivateKey,
-            preimage: this.preimage(),
-            destinationScript: this.deps.wallet.payoutScript(this.dstNet),
-            feeSat,
-          }).hex,
+        await this.broadcastConfirmed(
+          this.dst,
+          'dest_claim',
+          async (feeSat) =>
+            (
+              await buildClaimTx({
+                leg: this.plan.destLeg,
+                utxo: { txid: lk.txid, vout: lk.vout, amountSat: sat(lk.amountSat) },
+                signer: this.deps.swapSigner,
+                preimage: this.preimage(),
+                destinationScript: this.deps.wallet.payoutScript(this.dstNet),
+                feeSat,
+                extraOutputs: this.feeOutputs(),
+              })
+            ).hex,
+          { deadlineHeight: r.params.destTimeoutHeight },
         );
         await this.advance('preimage_revealed');
         return;
       }
       case 'preimage_revealed': {
-        // Reclaim the option bond with the same preimage (no timelock). Idempotent.
+        // Reclaim the option bond with the same preimage (no timelock). Must land before the maker
+        // can forfeit it at bondForfeitHeight. Idempotent.
         const lk = r.lockups.bond!;
-        await this.broadcastConfirmed(this.bnd, 'bond_reclaim', (feeSat) =>
-          buildBondReclaimTx({
-            bond: this.plan.optionBond,
-            utxo: { txid: lk.txid, vout: lk.vout, amountSat: sat(lk.amountSat) },
-            ownerPrivateKey: this.deps.swapPrivateKey,
-            preimage: this.preimage(),
-            destinationScript: this.deps.wallet.payoutScript(this.bndNet),
-            feeSat,
-          }).hex,
+        await this.broadcastConfirmed(
+          this.bnd,
+          'bond_reclaim',
+          async (feeSat) =>
+            (
+              await buildBondReclaimTx({
+                bond: this.plan.optionBond,
+                utxo: { txid: lk.txid, vout: lk.vout, amountSat: sat(lk.amountSat) },
+                ownerSigner: this.deps.swapSigner,
+                preimage: this.preimage(),
+                destinationScript: this.deps.wallet.payoutScript(this.bndNet),
+                feeSat,
+              })
+            ).hex,
+          { deadlineHeight: r.params.bondForfeitHeight },
         );
         await this.advance('completed');
         return;
@@ -319,15 +348,17 @@ export class SwapExecutor {
     // 1. Refund the source leg after its timeout (recovers the taker's principal).
     await this.waitForHeight(this.src, r.params.sourceTimeoutHeight);
     const src = r.lockups.source!;
-    await this.broadcastConfirmed(this.src, 'source_refund', (feeSat) =>
-      buildRefundTx({
-        leg: this.plan.sourceLeg,
-        utxo: { txid: src.txid, vout: src.vout, amountSat: sat(src.amountSat) },
-        refundPrivateKey: this.deps.swapPrivateKey,
-        timeoutBlockHeight: r.params.sourceTimeoutHeight,
-        destinationScript: this.deps.wallet.payoutScript(this.srcNet),
-        feeSat,
-      }).hex,
+    await this.broadcastConfirmed(this.src, 'source_refund', async (feeSat) =>
+      (
+        await buildRefundTx({
+          leg: this.plan.sourceLeg,
+          utxo: { txid: src.txid, vout: src.vout, amountSat: sat(src.amountSat) },
+          signer: this.deps.swapSigner,
+          timeoutBlockHeight: r.params.sourceTimeoutHeight,
+          destinationScript: this.deps.wallet.payoutScript(this.srcNet),
+          feeSat,
+        })
+      ).hex,
     );
     r.phase = 'source_refunded';
     await this.persist();
@@ -342,15 +373,17 @@ export class SwapExecutor {
     const bond = r.lockups.bond;
     if (bond) {
       try {
-        await this.broadcastConfirmed(this.bnd, 'bond_reclaim', (feeSat) =>
-          buildBondReclaimTx({
-            bond: this.plan.optionBond,
-            utxo: { txid: bond.txid, vout: bond.vout, amountSat: sat(bond.amountSat) },
-            ownerPrivateKey: this.deps.swapPrivateKey,
-            preimage: this.preimage(),
-            destinationScript: this.deps.wallet.payoutScript(this.bndNet),
-            feeSat,
-          }).hex,
+        await this.broadcastConfirmed(this.bnd, 'bond_reclaim', async (feeSat) =>
+          (
+            await buildBondReclaimTx({
+              bond: this.plan.optionBond,
+              utxo: { txid: bond.txid, vout: bond.vout, amountSat: sat(bond.amountSat) },
+              ownerSigner: this.deps.swapSigner,
+              preimage: this.preimage(),
+              destinationScript: this.deps.wallet.payoutScript(this.bndNet),
+              feeSat,
+            })
+          ).hex,
         );
         r.phase = 'bond_reclaimed_on_abort';
       } catch (e) {
@@ -410,6 +443,15 @@ export class SwapExecutor {
       }
       case 'dest_funded': {
         // Watch the dest leg for the taker's claim (reveals the preimage) until destTimeout.
+        //
+        // REORG SAFETY: we act on the preimage as soon as the spend is seen, without waiting for
+        // confirmations, and that is safe. The preimage is a SECRET, not a transaction — it does not
+        // become invalid if the dest claim is later reorged out. If that happens, our source claim
+        // (on the OTHER chain, deadline-driven below) still stands, and the taker can re-claim dest
+        // with the same preimage; every leg still settles to its intended owner. The only thing that
+        // must beat a clock is the source claim itself, which broadcastConfirmed gates on
+        // sourceTimeoutHeight. (Lockups, by contrast, ARE reorg-sensitive and were already required
+        // to reach minConfs before we funded dest.)
         const lk = r.lockups.dest!;
         const spend = await this.raceSpend(this.dst, { txid: lk.txid, vout: lk.vout }, r.params.destTimeoutHeight);
         if (!spend) {
@@ -424,17 +466,24 @@ export class SwapExecutor {
         return;
       }
       case 'preimage_revealed': {
-        // Claim the source leg with the learned preimage. Must confirm before sourceTimeout.
+        // Claim the source leg with the learned preimage. Must confirm before sourceTimeout, else
+        // the taker refunds source and we lose principal — so this is deadline-driven.
         const src = r.lockups.source!;
-        await this.broadcastConfirmed(this.src, 'source_claim', (feeSat) =>
-          buildClaimTx({
-            leg: this.plan.sourceLeg,
-            utxo: { txid: src.txid, vout: src.vout, amountSat: sat(src.amountSat) },
-            claimPrivateKey: this.deps.swapPrivateKey,
-            preimage: this.preimage(),
-            destinationScript: this.deps.wallet.payoutScript(this.srcNet),
-            feeSat,
-          }).hex,
+        await this.broadcastConfirmed(
+          this.src,
+          'source_claim',
+          async (feeSat) =>
+            (
+              await buildClaimTx({
+                leg: this.plan.sourceLeg,
+                utxo: { txid: src.txid, vout: src.vout, amountSat: sat(src.amountSat) },
+                signer: this.deps.swapSigner,
+                preimage: this.preimage(),
+                destinationScript: this.deps.wallet.payoutScript(this.srcNet),
+                feeSat,
+              })
+            ).hex,
+          { deadlineHeight: r.params.sourceTimeoutHeight },
         );
         await this.advance('completed');
         return;
@@ -450,15 +499,17 @@ export class SwapExecutor {
     // 1. Refund the dest leg after its timeout (recovers the maker's principal).
     await this.waitForHeight(this.dst, r.params.destTimeoutHeight);
     const dst = r.lockups.dest!;
-    await this.broadcastConfirmed(this.dst, 'dest_refund', (feeSat) =>
-      buildRefundTx({
-        leg: this.plan.destLeg,
-        utxo: { txid: dst.txid, vout: dst.vout, amountSat: sat(dst.amountSat) },
-        refundPrivateKey: this.deps.swapPrivateKey,
-        timeoutBlockHeight: r.params.destTimeoutHeight,
-        destinationScript: this.deps.wallet.payoutScript(this.dstNet),
-        feeSat,
-      }).hex,
+    await this.broadcastConfirmed(this.dst, 'dest_refund', async (feeSat) =>
+      (
+        await buildRefundTx({
+          leg: this.plan.destLeg,
+          utxo: { txid: dst.txid, vout: dst.vout, amountSat: sat(dst.amountSat) },
+          signer: this.deps.swapSigner,
+          timeoutBlockHeight: r.params.destTimeoutHeight,
+          destinationScript: this.deps.wallet.payoutScript(this.dstNet),
+          feeSat,
+        })
+      ).hex,
     );
     r.phase = 'dest_refunded';
     await this.persist();
@@ -467,15 +518,17 @@ export class SwapExecutor {
     const bond = r.lockups.bond!;
     await this.waitForHeight(this.bnd, r.params.bondForfeitHeight);
     try {
-      await this.broadcastConfirmed(this.bnd, 'bond_forfeit', (feeSat) =>
-        buildBondForfeitTx({
-          bond: this.plan.optionBond,
-          utxo: { txid: bond.txid, vout: bond.vout, amountSat: sat(bond.amountSat) },
-          counterpartyPrivateKey: this.deps.swapPrivateKey,
-          forfeitTimeoutHeight: r.params.bondForfeitHeight,
-          destinationScript: this.deps.wallet.payoutScript(this.bndNet),
-          feeSat,
-        }).hex,
+      await this.broadcastConfirmed(this.bnd, 'bond_forfeit', async (feeSat) =>
+        (
+          await buildBondForfeitTx({
+            bond: this.plan.optionBond,
+            utxo: { txid: bond.txid, vout: bond.vout, amountSat: sat(bond.amountSat) },
+            counterpartySigner: this.deps.swapSigner,
+            forfeitTimeoutHeight: r.params.bondForfeitHeight,
+            destinationScript: this.deps.wallet.payoutScript(this.bndNet),
+            feeSat,
+          })
+        ).hex,
       );
       r.phase = 'bond_forfeited';
     } catch (e) {
@@ -529,14 +582,25 @@ export class SwapExecutor {
   }
 
   /**
-   * Broadcast a tx and keep it alive until confirmed, RBF-bumping the fee on each timeout. The
+   * Broadcast a tx and keep it alive until it CONFIRMS, RBF-bumping the fee on each timeout. The
    * action label keys the stored txid so a restart re-checks confirmation before re-broadcasting
    * (idempotent). `build(feeSat)` returns the signed raw hex at the given miner fee.
+   *
+   * Liveness is the contract: this does NOT return on an unconfirmed tx. Fee escalation is capped at
+   * `maxBumps` (to bound cost), but it keeps re-broadcasting at the top rate until the tx lands — so
+   * a caller that gets a return value KNOWS the tx confirmed and can safely advance the state machine.
+   *
+   * `opts.deadlineHeight` (set for time-critical CLAIMS that must beat a timeout — the taker's dest
+   * claim before destTimeout, the maker's source claim before sourceTimeout, the taker's bond
+   * reclaim before bondForfeit) makes the wait deadline-driven: if the chain reaches the deadline
+   * before the tx confirms, it THROWS instead of returning, so the caller never advances past an
+   * unconfirmed, now-unsafe claim (the previous code returned silently here — a principal-loss bug).
    */
   private async broadcastConfirmed(
     client: ChainClient,
     action: string,
-    build: (feeSat: bigint) => string,
+    build: (feeSat: bigint) => Promise<string>,
+    opts: { deadlineHeight?: number } = {},
   ): Promise<string> {
     const prior = this.record.txids[action];
     if (prior) {
@@ -545,15 +609,25 @@ export class SwapExecutor {
     }
     const rate = await client.estimateFeeSatPerVbyte();
     let lastTxid = prior ?? '';
-    for (let bump = 0; bump <= this.p.maxBumps; bump++) {
-      const feeSat = BigInt(
-        Math.ceil(rate * this.p.approxVbytes * Math.pow(this.p.bumpFactor, bump)),
-      );
-      lastTxid = await client.broadcast(build(feeSat));
+    let bump = 0;
+    while (!this.stopped) {
+      if (
+        opts.deadlineHeight !== undefined &&
+        (await client.getBlockHeight()) >= opts.deadlineHeight
+      ) {
+        throw new Error(
+          `${action}: reached deadline height ${opts.deadlineHeight} before the tx confirmed`,
+        );
+      }
+      const exp = Math.min(bump, this.p.maxBumps); // cap fee growth, but keep rebroadcasting
+      const feeSat = BigInt(Math.ceil(rate * this.p.approxVbytes * Math.pow(this.p.bumpFactor, exp)));
+      lastTxid = await client.broadcast(await build(feeSat));
       this.record.txids[action] = lastTxid;
       await this.persist();
       if (await this.pollConfirmed(client, lastTxid)) return lastTxid;
-      this.log(`${action} not confirmed; bumping fee (bump ${bump + 1}/${this.p.maxBumps})`);
+      bump++;
+      const dl = opts.deadlineHeight !== undefined ? `, deadline h=${opts.deadlineHeight}` : '';
+      this.log(`${action} not confirmed; RBF-bumping the fee (bump ${bump}${dl})`);
     }
     return lastTxid;
   }
@@ -568,6 +642,12 @@ export class SwapExecutor {
       await sleep(this.p.pollMs);
     }
     return false;
+  }
+
+  /** The operator fee output(s) to attach to the taker's dest claim, if a fee was committed. */
+  private feeOutputs(): SpendOutput[] | undefined {
+    const f = this.plan.operatorFee;
+    return f ? [{ script: f.script, amountSat: f.amountSat }] : undefined;
   }
 
   private preimage(): Uint8Array {

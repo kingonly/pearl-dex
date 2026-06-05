@@ -1,6 +1,7 @@
 import type { BTC_NETWORK } from '@scure/btc-signer/utils.js';
 import { tagForNetwork } from '../common/networks.js';
 import {
+  assertSafeBondTimeout,
   assertSafeTimeouts,
   computeBondForfeitHeight,
   computeSwapTimeouts,
@@ -137,9 +138,10 @@ export function validateProposedTimeouts(p: {
   // The bond is on the SOURCE (quote) chain, so vs the source timeout this is a same-chain height
   // comparison: forfeit must come before source refund (else a walker could refund source, then
   // safely reveal the preimage and reclaim the bond, escaping the penalty).
-  if (p.timeouts.bondForfeitHeight >= p.timeouts.sourceTimeoutHeight) {
-    throw new Error('unsafe bond: forfeit height must be before the source timeout');
-  }
+  assertSafeBondTimeout({
+    bondForfeitHeight: p.timeouts.bondForfeitHeight,
+    sourceTimeoutHeight: p.timeouts.sourceTimeoutHeight,
+  });
   // vs the dest timeout the bond is on a DIFFERENT chain, so compare in wall-clock: the bond may
   // only become forfeitable after the dest leg has resolved (the taker has provably been able to
   // walk).

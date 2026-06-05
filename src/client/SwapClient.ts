@@ -1,4 +1,5 @@
-import { pubECDSA, pubSchnorr, sha256 } from '@scure/btc-signer/utils.js';
+import { pubSchnorr, sha256 } from '@scure/btc-signer/utils.js';
+import type { Signer } from '../signer/index.js';
 import type { ChainClient } from '../settlement/ChainClient.js';
 import type { ChainTiming } from '../settlement/Timelocks.js';
 import { makePreimage } from '../settlement/SwapTree.js';
@@ -67,8 +68,13 @@ export interface SwapClientDeps {
   connection: RelayConnection;
   /** identity key — signs order intents (BIP-340 schnorr). */
   identityPrivateKey: Uint8Array;
-  /** swap key — backs this user's swap legs / bond (ECDSA). */
-  swapPrivateKey: Uint8Array;
+  /**
+   * swap signer — authority over this user's swap legs / bond, through the Signer seam (a held key
+   * via LocalSigner, or a remote/Privy signer that only signs hashes). Never custodies funds: legs
+   * always pay out to `wallet.payoutScript`. This is what lets a browser user sign without the app
+   * holding their key.
+   */
+  swapSigner: Signer;
   wallet: SwapWallet;
   /** quote (BTC) chain client = the swap's SOURCE/bond leg. */
   source: ChainClient;
@@ -110,7 +116,7 @@ export class SwapClient {
 
   constructor(private readonly deps: SwapClientDeps) {
     this.id = hx(pubSchnorr(deps.identityPrivateKey));
-    this.swapPubHex = hx(pubECDSA(deps.swapPrivateKey, true));
+    this.swapPubHex = hx(deps.swapSigner.publicKey());
     if (deps.connection.id !== this.id) {
       throw new Error('relay connection id does not match this client identity');
     }
@@ -250,7 +256,7 @@ export class SwapClient {
       dest: this.deps.dest,
       bond: this.deps.bond ?? this.deps.source,
       wallet: this.deps.wallet,
-      swapPrivateKey: this.deps.swapPrivateKey,
+      swapSigner: this.deps.swapSigner,
       policy: this.deps.config.executorPolicy,
       log: this.deps.log,
     });

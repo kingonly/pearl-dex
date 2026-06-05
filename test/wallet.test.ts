@@ -3,6 +3,7 @@ import { pubECDSA, pubSchnorr, randomPrivateKeyBytes } from '@scure/btc-signer/u
 import { bitcoinSignet, pearlSimnet, p2trAddress } from '../src/common/index.js';
 import { PEARL_TIMING, SIGNET_TIMING } from '../src/settlement/index.js';
 import { makePreimage } from '../src/settlement/SwapTree.js';
+import { LocalSigner } from '../src/signer/index.js';
 import {
   SwapExecutor,
   newTakerRecord,
@@ -95,10 +96,10 @@ describe('ReferenceWallet', () => {
 
     const FAST = { minConfs: 1, pollMs: 2, bumpAfterMs: 10_000, maxBumps: 2 };
     const takerExec = new SwapExecutor(newTakerRecord({ id: 'w', params, preimage, amounts }), {
-      store: new MemorySwapStore(), source: btc, dest: prl, bond: btc, wallet: takerWallet, swapPrivateKey: taker.swap, policy: FAST,
+      store: new MemorySwapStore(), source: btc, dest: prl, bond: btc, wallet: takerWallet, swapSigner: new LocalSigner(taker.swap), policy: FAST,
     });
     const makerExec = new SwapExecutor(newMakerRecord({ id: 'w', params, amounts }), {
-      store: new MemorySwapStore(), source: btc, dest: prl, bond: btc, wallet: makerWallet, swapPrivateKey: maker.swap, policy: FAST,
+      store: new MemorySwapStore(), source: btc, dest: prl, bond: btc, wallet: makerWallet, swapSigner: new LocalSigner(maker.swap), policy: FAST,
     });
 
     const [takerRec, makerRec] = await Promise.all([takerExec.run(), makerExec.run()]);

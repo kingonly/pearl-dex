@@ -26,6 +26,7 @@ import {
 } from '../src/coordination/index.js';
 import { ScriptedChainClient } from './helpers/ScriptedChain.js';
 import { ScriptedWallet } from './helpers/ScriptedWallet.js';
+import { LocalSigner } from '../src/signer/index.js';
 
 // Full pipe: two parties post crossing signed intents -> the relay matches them -> they run the
 // settlement handshake THROUGH the relay -> both derive identical swap terms -> their SwapExecutors
@@ -106,7 +107,7 @@ describe('Relay E2E — intent → match → handshake → settlement', () => {
         dest: prl,
         bond: btc,
         wallet,
-        swapPrivateKey: p.swapPriv,
+        swapSigner: new LocalSigner(p.swapPriv),
         policy: FAST,
       });
       let preimage: ReturnType<typeof makePreimage> | undefined;

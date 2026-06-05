@@ -1,5 +1,6 @@
 import type { BTC_NETWORK } from '@scure/btc-signer/utils.js';
 import { Transaction } from '@scure/btc-signer';
+import type { Signer } from '../signer/index.js';
 import {
   buildClaimTx,
   buildRefundTx,
@@ -63,15 +64,15 @@ export function buildBond(p: BuildBondParams): Bond {
 export function buildBondReclaimTx(args: {
   bond: Bond;
   utxo: LockupUtxo;
-  ownerPrivateKey: Uint8Array;
+  ownerSigner: Signer;
   preimage: Uint8Array;
   destinationScript: Uint8Array;
   feeSat: bigint;
-}): Transaction {
+}): Promise<Transaction> {
   return buildClaimTx({
     leg: args.bond,
     utxo: args.utxo,
-    claimPrivateKey: args.ownerPrivateKey,
+    signer: args.ownerSigner,
     preimage: args.preimage,
     destinationScript: args.destinationScript,
     feeSat: args.feeSat,
@@ -85,15 +86,15 @@ export function buildBondReclaimTx(args: {
 export function buildBondForfeitTx(args: {
   bond: Bond;
   utxo: LockupUtxo;
-  counterpartyPrivateKey: Uint8Array;
+  counterpartySigner: Signer;
   forfeitTimeoutHeight: number;
   destinationScript: Uint8Array;
   feeSat: bigint;
-}): Transaction {
+}): Promise<Transaction> {
   return buildRefundTx({
     leg: args.bond,
     utxo: args.utxo,
-    refundPrivateKey: args.counterpartyPrivateKey,
+    signer: args.counterpartySigner,
     timeoutBlockHeight: args.forfeitTimeoutHeight,
     destinationScript: args.destinationScript,
     feeSat: args.feeSat,

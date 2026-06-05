@@ -8,6 +8,7 @@ import {
   PEARL_TIMING,
   SIGNET_TIMING,
 } from '../src/settlement/Timelocks.js';
+import { LocalSigner } from '../src/signer/index.js';
 
 function participant() {
   const priv = randomPrivateKeyBytes();
@@ -40,14 +41,14 @@ describe('Bond (secret-tied forfeitable bond — the free-option fix)', () => {
     expect(p.bond.address.startsWith('rprl1p')).toBe(true);
   });
 
-  it('reclaim: owner spends by revealing the preimage (preimage is recoverable on-chain)', () => {
+  it('reclaim: owner spends by revealing the preimage (preimage is recoverable on-chain)', async () => {
     const { owner, preimage, bond } = bondFixture(bitcoinSignet);
     const dest = participant();
 
-    const tx = buildBondReclaimTx({
+    const tx = await buildBondReclaimTx({
       bond,
       utxo: { txid: 'ab'.repeat(32), vout: 0, amountSat: 50_000n },
-      ownerPrivateKey: owner.priv,
+      ownerSigner: new LocalSigner(owner.priv),
       preimage,
       destinationScript: p2trScript(dest.xonly, bitcoinSignet),
       feeSat: 400n,
@@ -60,14 +61,14 @@ describe('Bond (secret-tied forfeitable bond — the free-option fix)', () => {
     expect(Buffer.from(extractPreimage(tx.hex, 0))).toEqual(Buffer.from(preimage));
   });
 
-  it('forfeit: counterparty spends after the timeout (carries the forfeit locktime)', () => {
+  it('forfeit: counterparty spends after the timeout (carries the forfeit locktime)', async () => {
     const { counterparty, bond, forfeitTimeoutHeight } = bondFixture(pearlSimnet, 321);
     const dest = participant();
 
-    const tx = buildBondForfeitTx({
+    const tx = await buildBondForfeitTx({
       bond,
       utxo: { txid: 'cd'.repeat(32), vout: 1, amountSat: 50_000n },
-      counterpartyPrivateKey: counterparty.priv,
+      counterpartySigner: new LocalSigner(counterparty.priv),
       forfeitTimeoutHeight,
       destinationScript: p2trScript(dest.xonly, pearlSimnet),
       feeSat: 400n,

@@ -14,6 +14,7 @@ import {
   type Pair,
 } from '../src/coordination/index.js';
 import { SwapClient, type SwapClientConfig } from '../src/client/index.js';
+import { LocalSigner } from '../src/signer/index.js';
 import { ScriptedChainClient } from './helpers/ScriptedChain.js';
 import { ScriptedWallet } from './helpers/ScriptedWallet.js';
 
@@ -70,7 +71,7 @@ describe('SwapClient — intent → match → handshake → settlement, one obje
       new SwapClient({
         connection: relay.connect(hx(k.idXonly)),
         identityPrivateKey: k.idPriv,
-        swapPrivateKey: k.swapPriv,
+        swapSigner: new LocalSigner(k.swapPriv),
         wallet: new ScriptedWallet([btc, prl], k.swapXonly),
         source: btc,
         dest: prl,
@@ -181,7 +182,7 @@ describe('SwapClient — intent → match → handshake → settlement, one obje
     const client = new SwapClient({
       connection: relay.connect(hx(k.idXonly)),
       identityPrivateKey: k.idPriv,
-      swapPrivateKey: k.swapPriv,
+      swapSigner: new LocalSigner(k.swapPriv),
       wallet,
       source: btc,
       dest: prl,

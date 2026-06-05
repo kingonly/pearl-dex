@@ -13,6 +13,7 @@ import {
 import { SwapClient, type SwapClientConfig } from '../src/client/index.js';
 import { ScriptedChainClient } from './helpers/ScriptedChain.js';
 import { ScriptedWallet } from './helpers/ScriptedWallet.js';
+import { LocalSigner } from '../src/signer/index.js';
 
 const PRL_BTC: Pair = { base: 'PRL', quote: 'BTC' };
 const COIN = 100_000_000n;
@@ -65,7 +66,7 @@ describe('WsRelayServer — settlement over a real WebSocket transport', () => {
       new SwapClient({
         connection: conn,
         identityPrivateKey: k.id,
-        swapPrivateKey: k.swap,
+        swapSigner: new LocalSigner(k.swap),
         wallet: new ScriptedWallet([btc, prl], k.swapXonly),
         source: btc,
         dest: prl,

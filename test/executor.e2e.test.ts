@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { Transaction } from '@scure/btc-signer';
 import { pubECDSA, pubSchnorr, randomPrivateKeyBytes } from '@scure/btc-signer/utils.js';
-import { bitcoinSignet, pearlSimnet } from '../src/common/index.js';
+import { bitcoinSignet, pearlSimnet, p2trScript } from '../src/common/index.js';
 import { makePreimage, extractPreimage } from '../src/settlement/SwapTree.js';
 import {
   SwapExecutor,
@@ -14,6 +15,7 @@ import {
 } from '../src/coordination/index.js';
 import { ScriptedChainClient } from './helpers/ScriptedChain.js';
 import { ScriptedWallet } from './helpers/ScriptedWallet.js';
+import { LocalSigner } from '../src/signer/index.js';
 
 // Two-user BTC->PRL swap driven end-to-end by the coordinator state machine. Taker has BTC
 // (source + bond on BTC), maker has PRL (dest). Both executors run concurrently against the SAME
@@ -69,7 +71,7 @@ function makeWorld() {
     dest: prl,
     bond: btc,
     wallet: takerWallet,
-    swapPrivateKey: taker.priv,
+    swapSigner: new LocalSigner(taker.priv),
     policy: FAST,
   });
   const makerDeps = (store: SwapStore): SwapExecutorDeps => ({
@@ -78,7 +80,7 @@ function makeWorld() {
     dest: prl,
     bond: btc,
     wallet: makerWallet,
-    swapPrivateKey: maker.priv,
+    swapSigner: new LocalSigner(maker.priv),
     policy: FAST,
   });
 
@@ -277,5 +279,45 @@ describe('SwapExecutor — P2P coordinator (scripted BTC->PRL)', () => {
     expect(w.prl.broadcasts).toHaveLength(2);
     // The two broadcasts differ (a higher fee changes the tx and therefore its id).
     expect(w.prl.broadcasts[0]).not.toBe(w.prl.broadcasts[1]);
+  });
+
+  it('operator fee: the taker dest claim pays the committed fee output (collected on consummation)', async () => {
+    const w = makeWorld();
+    const operator = participant();
+    const FEE_SAT = 250n;
+    // The fee is collected on the taker's dest (PRL) claim, so the fee output is on the PRL chain.
+    const feeScript = p2trScript(operator.xonly, pearlSimnet);
+    const params: SwapParamsJSON = {
+      ...w.params,
+      operatorFee: { scriptHex: hx(feeScript), amountSat: FEE_SAT.toString() },
+    };
+
+    const takerExec = new SwapExecutor(
+      newTakerRecord({ id: 'sf', params, preimage: w.preimage, amounts: w.amounts }),
+      w.takerDeps(w.takerStore),
+    );
+    const makerExec = new SwapExecutor(
+      newMakerRecord({ id: 'sf', params, amounts: w.amounts }),
+      w.makerDeps(w.makerStore),
+    );
+
+    const [takerRec, makerRec] = await Promise.all([takerExec.run(), makerExec.run()]);
+    expect(takerRec.phase).toBe('completed');
+    expect(makerRec.phase).toBe('completed');
+
+    // The dest claim carries TWO outputs: the taker's payout + the operator fee.
+    const destClaim = Transaction.fromRaw(Buffer.from(w.prl.broadcasts[0], 'hex'), {
+      allowUnknownOutputs: true,
+      disableScriptCheck: true,
+    });
+    expect(destClaim.outputsLength).toBe(2);
+    const feeOut = destClaim.getOutput(1);
+    expect(feeOut.amount).toBe(FEE_SAT);
+    expect(Buffer.from(feeOut.script!)).toEqual(Buffer.from(feeScript));
+    // The taker bears the fee: it nets dest minus the operator fee (and the miner fee).
+    expect((destClaim.getOutput(0).amount as bigint) + FEE_SAT).toBeLessThan(DEST_AMT);
+
+    // The maker's source claim is unaffected — only the consummating dest claim pays the fee.
+    expect(w.btc.broadcasts).toHaveLength(2); // source claim + taker bond reclaim, no fee output
   });
 });

@@ -4,6 +4,7 @@ import { bitcoinSignet, pearlSimnet, p2trScript } from '../src/common/index.js';
 import { makePreimage, extractPreimage, buildClaimTx, buildRefundTx } from '../src/settlement/SwapTree.js';
 import { buildBondReclaimTx, buildBondForfeitTx } from '../src/settlement/Bond.js';
 import { buildSwapPlan } from '../src/settlement/SwapPlan.js';
+import { LocalSigner } from '../src/signer/index.js';
 import { ScriptedChainClient } from './helpers/ScriptedChain.js';
 
 // Two-user BTC->PRL swap. TAKER has BTC (source), MAKER has PRL (dest). The taker holds the
@@ -86,10 +87,10 @@ describe('P2P swap + option bond (scripted chains, BTC->PRL)', () => {
     s.prl.setHeight(100); // below DEST_TIMEOUT
 
     // 1. Taker claims the dest (PRL) leg, revealing the preimage on the PRL chain.
-    const takerDestClaim = buildClaimTx({
+    const takerDestClaim = await buildClaimTx({
       leg: s.plan.destLeg,
       utxo: { ...s.destUtxo, amountSat: BigInt(DEST_AMT) },
-      claimPrivateKey: s.taker.priv,
+      signer: new LocalSigner(s.taker.priv),
       preimage: s.preimage,
       destinationScript: p2trScript(s.taker.xonly, pearlSimnet),
       feeSat: FEE,
@@ -106,10 +107,10 @@ describe('P2P swap + option bond (scripted chains, BTC->PRL)', () => {
     const learned = extractPreimage(spend.spendTxHex, spend.inputIndex);
     expect(Buffer.from(learned)).toEqual(Buffer.from(s.preimage)); // preimage crossed chains
 
-    const makerSourceClaim = buildClaimTx({
+    const makerSourceClaim = await buildClaimTx({
       leg: s.plan.sourceLeg,
       utxo: { ...s.srcUtxo, amountSat: BigInt(SRC_AMT) },
-      claimPrivateKey: s.maker.priv,
+      signer: new LocalSigner(s.maker.priv),
       preimage: learned,
       destinationScript: p2trScript(s.maker.xonly, bitcoinSignet),
       feeSat: FEE,
@@ -117,10 +118,10 @@ describe('P2P swap + option bond (scripted chains, BTC->PRL)', () => {
     await s.btc.broadcast(makerSourceClaim.hex);
 
     // 3. Taker reclaims the option bond by revealing the same preimage (it is NOT forfeited).
-    const takerBondReclaim = buildBondReclaimTx({
+    const takerBondReclaim = await buildBondReclaimTx({
       bond: s.plan.optionBond,
       utxo: { ...s.bondUtxo, amountSat: BigInt(BOND_AMT) },
-      ownerPrivateKey: s.taker.priv,
+      ownerSigner: new LocalSigner(s.taker.priv),
       preimage: s.preimage,
       destinationScript: p2trScript(s.taker.xonly, bitcoinSignet),
       feeSat: FEE,
@@ -142,30 +143,30 @@ describe('P2P swap + option bond (scripted chains, BTC->PRL)', () => {
     // No dest claim is ever broadcast, so the preimage is never revealed.
 
     // Maker refunds the dest (PRL) leg after DEST_TIMEOUT.
-    const makerDestRefund = buildRefundTx({
+    const makerDestRefund = await buildRefundTx({
       leg: s.plan.destLeg,
       utxo: { ...s.destUtxo, amountSat: BigInt(DEST_AMT) },
-      refundPrivateKey: s.maker.priv,
+      signer: new LocalSigner(s.maker.priv),
       timeoutBlockHeight: s.DEST_TIMEOUT,
       destinationScript: p2trScript(s.maker.xonly, pearlSimnet),
       feeSat: FEE,
     });
 
     // Taker refunds the source (BTC) leg after SOURCE_TIMEOUT.
-    const takerSourceRefund = buildRefundTx({
+    const takerSourceRefund = await buildRefundTx({
       leg: s.plan.sourceLeg,
       utxo: { ...s.srcUtxo, amountSat: BigInt(SRC_AMT) },
-      refundPrivateKey: s.taker.priv,
+      signer: new LocalSigner(s.taker.priv),
       timeoutBlockHeight: s.SOURCE_TIMEOUT,
       destinationScript: p2trScript(s.taker.xonly, bitcoinSignet),
       feeSat: FEE,
     });
 
     // Maker forfeit-claims the option bond after BOND_FORFEIT (compensation for the walk).
-    const makerBondForfeit = buildBondForfeitTx({
+    const makerBondForfeit = await buildBondForfeitTx({
       bond: s.plan.optionBond,
       utxo: { ...s.bondUtxo, amountSat: BigInt(BOND_AMT) },
-      counterpartyPrivateKey: s.maker.priv,
+      counterpartySigner: new LocalSigner(s.maker.priv),
       forfeitTimeoutHeight: s.BOND_FORFEIT,
       destinationScript: p2trScript(s.maker.xonly, bitcoinSignet),
       feeSat: FEE,

@@ -9,6 +9,7 @@ import {
   extractPreimage,
   type BuildLegParams,
 } from '../src/settlement/SwapTree.js';
+import { LocalSigner } from '../src/signer/index.js';
 
 // Generate a participant: 33-byte compressed key for Musig, x-only for the destination.
 function participant() {
@@ -55,15 +56,15 @@ describe('SwapTree (ported settlement core)', () => {
     expect(Buffer.from(btc.internalKey)).toEqual(Buffer.from(a.internalKey));
   });
 
-  it('builds a claim tx that reveals the recoverable preimage', () => {
+  it('builds a claim tx that reveals the recoverable preimage', async () => {
     const { params, claim, preimage } = legParams(pearlSimnet);
     const leg = buildSwapLeg(params);
     const dest = participant();
 
-    const tx = buildClaimTx({
+    const tx = await buildClaimTx({
       leg,
       utxo: { txid: '11'.repeat(32), vout: 0, amountSat: 100_000n },
-      claimPrivateKey: claim.priv,
+      signer: new LocalSigner(claim.priv),
       preimage,
       destinationScript: p2trScript(dest.xonly, pearlSimnet),
       feeSat: 500n,
@@ -74,15 +75,57 @@ describe('SwapTree (ported settlement core)', () => {
     expect(Buffer.from(extractPreimage(tx.hex, 0))).toEqual(Buffer.from(preimage));
   });
 
-  it('builds a refund tx with the timeout locktime', () => {
+  it('attaches an extra (operator-fee) output and pays it out of the claimed amount', async () => {
+    const { params, claim, preimage } = legParams(pearlSimnet);
+    const leg = buildSwapLeg(params);
+    const dest = participant();
+    const operator = participant();
+    const feeScript = p2trScript(operator.xonly, pearlSimnet);
+
+    const tx = await buildClaimTx({
+      leg,
+      utxo: { txid: '33'.repeat(32), vout: 0, amountSat: 100_000n },
+      signer: new LocalSigner(claim.priv),
+      preimage,
+      destinationScript: p2trScript(dest.xonly, pearlSimnet),
+      feeSat: 500n,
+      extraOutputs: [{ script: feeScript, amountSat: 2_000n }],
+    });
+
+    // Two outputs: the user's payout (input - minerFee - fee) and the operator fee.
+    expect(tx.outputsLength).toBe(2);
+    expect(tx.getOutput(0).amount).toBe(100_000n - 500n - 2_000n);
+    expect(tx.getOutput(1).amount).toBe(2_000n);
+    expect(Buffer.from(tx.getOutput(1).script!)).toEqual(Buffer.from(feeScript));
+  });
+
+  it('refuses to build when the miner fee + extras would underflow the output', async () => {
+    const { params, claim, preimage } = legParams(pearlSimnet);
+    const leg = buildSwapLeg(params);
+    const dest = participant();
+
+    await expect(
+      buildClaimTx({
+        leg,
+        utxo: { txid: '44'.repeat(32), vout: 0, amountSat: 1_000n },
+        signer: new LocalSigner(claim.priv),
+        preimage,
+        destinationScript: p2trScript(dest.xonly, pearlSimnet),
+        feeSat: 900n,
+        extraOutputs: [{ script: p2trScript(participant().xonly, pearlSimnet), amountSat: 500n }],
+      }),
+    ).rejects.toThrow(/underflow/);
+  });
+
+  it('builds a refund tx with the timeout locktime', async () => {
     const { params, refund } = legParams(bitcoinSignet, { timeoutBlockHeight: 321 });
     const leg = buildSwapLeg(params);
     const dest = participant();
 
-    const tx = buildRefundTx({
+    const tx = await buildRefundTx({
       leg,
       utxo: { txid: '22'.repeat(32), vout: 1, amountSat: 250_000n },
-      refundPrivateKey: refund.priv,
+      signer: new LocalSigner(refund.priv),
       timeoutBlockHeight: 321,
       destinationScript: p2trScript(dest.xonly, bitcoinSignet),
       feeSat: 600n,
