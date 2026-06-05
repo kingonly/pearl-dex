@@ -25,9 +25,15 @@ add the bond economics.
 - The *idea* runs in production: Komodo's `bobdeposit` (over-collateralized maker bond) + taker
   `dexfee`. So it's not unprecedented — but on a niche, low-volume DEX, with known weaknesses, not
   at scale.
-- The **specific bilateral secret-tied bond** in DESIGN.md §5.3–5.4 is a sensible *composition* of
-  proven primitives (hashlock, CLTV, Komodo-style deposits) — but it is **not a single named
-  protocol with a track record.** It is new code implementing well-understood ideas.
+- The **taker option bond** (DESIGN.md §5.3) is a sensible *composition* of proven primitives
+  (hashlock, CLTV, Komodo-style deposits) — but it is **not a single named protocol with a track
+  record.** It is new code implementing well-understood ideas.
+- **Correction (do not over-claim):** we do NOT ship a bilateral "maker commitment bond." We proved
+  it can't be made sound with hashlocks — the maker-grief and taker-walk stalls are
+  on-chain-indistinguishable, so a symmetric bond cancels the option bond (see
+  docs/maker-grief-analysis.md). The residual maker-grief risk (a taker can lose its ~1–2% bond to a
+  first-time grief; principal always safe) is mitigated at the coordination layer (relay reputation),
+  not cryptographically. The cryptographic close is the OP_CAT covenant (optional, §5.5).
 - Risk: medium. Needs adversarial testing and ideally an external security review. Cannot be pointed
   to as "X has run this for years."
 

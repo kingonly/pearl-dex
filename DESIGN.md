@@ -127,13 +127,24 @@ forfeit leaf : <bond_timeout> OP_CHECKLOCKTIMEVERIFY OP_DROP <Bob_pk> OP_CHECKSI
 Set bond ≈ option value (~1–2% of notional) and the option is struck deep out-of-the-money;
 rational Alice never griefs. **This needs only hashlock + CLTV — Pearl supports it today, no covenant.**
 
-### 5.4 Bilateral bonding (both sides can grief)
+### 5.4 The maker-grief gap — and why a commitment bond can't close it (corrected)
 
-Bob can also grief — by not locking PRL after Alice locks BTC, wasting Alice's capital for `T_btc`.
-So the **maker posts a commitment bond when accepting the match**, before the taker locks,
-forfeitable to the taker if the maker fails to lock his leg. Net: two bonds, each forfeitable to the
-counterparty for failing an obligated step; the option-holder's bond additionally absorbs the price
-optionality. (This is Komodo's "both deposit" structure, tied to the swap secret + timeouts.)
+The maker can also grief: accept the match, wait for the taker to lock source + option bond, then
+never fund dest and forfeit-claim the taker's bond (~1–2% profit; the taker's principal is safe via
+refund). An earlier draft proposed a symmetric "maker commitment bond" (Komodo "both deposit") as the
+fix. **On analysis that is wrong** — see [`docs/maker-grief-analysis.md`](./docs/maker-grief-analysis.md)
+for the proof. The two stalls — *taker walk* and *maker never funds dest* — are
+**on-chain-indistinguishable** (in both, the preimage is never revealed; the dest leg is on the other
+chain). A bond keyed on that trigger fires identically in both, so a symmetric maker bond simply
+*cancels* the option bond in the walk case too, re-opening the free option. You cannot gate a
+forfeiture on an **omission** (not funding) with hashlocks — omissions reveal no secret.
+
+The real closes: an **OP_CAT covenant** binding the maker's forfeit to proof it funded dest (the one
+place the demoted §5.5 covenant has unique value); a **Lightning-style pre-signed penalty** (big
+protocol shift); or a **coordination-layer reputation** mitigation (shippable now — the relay
+de-prioritizes makers that fail to fund after matching; griefing costs an LP its flow, which exceeds
+the bond it could steal). **v1 ships the taker option bond + relay reputation, and does NOT ship a
+symmetric commitment bond** (it would silently re-open the free-option hole §5.3 exists to close).
 
 > **Key property:** the bond breaks the safety-vs-window tension. Refund timelocks stay long for
 > reorg safety, but because walking forfeits the bond, rational players consummate immediately,
@@ -183,7 +194,6 @@ product gate. **v1 ships on §5.3–5.4 with no covenant.**
 
 ```
 matched
-  → maker_bonded            (maker posts commitment bond)
   → taker_locked            (taker locks source leg + posts option bond)
   → maker_locked            (maker locks destination leg)
   → taker_claimed           (taker claims dest, revealing x)
@@ -191,10 +201,12 @@ matched
   → settled
 
 failure branches (all timelock-resolved, NO operator adjudication):
-  maker never locks   → taker refunds source + claims maker commitment bond
+  maker never locks   → taker refunds source; option bond at risk (§5.4 grief gap, reputation-mitigated)
   taker walks         → both refund + maker claims taker option bond
   crash mid-swap      → persistent, fee-bumped watcher completes/refunds idempotently on restart
 ```
+
+(No `maker_bonded` step: §5.4 shows a maker commitment bond can't be made sound with hashlocks.)
 
 pearl-swap's `SwapOrchestrator` already encodes most of this state machine; it becomes the
 **coordinator** watching two external user wallets instead of holding both sides.
@@ -214,12 +226,12 @@ is **load-bearing for safety** and part of v1.
 
 1. **Refactor pearl-swap LP→coordinator.** Orchestrator drives two *separate* user wallets; prove a
    two-user on-chain HTLC swap end-to-end (the swap itself is already proven cross-chain).
-2. **Bilateral secret-tied bonds** (§5.3–5.4) — pure hashlock+CLTV leaves, no covenant. Makes the
-   venue economically sound.
+2. **Taker option bond** (§5.3) — pure hashlock+CLTV leaves, no covenant. Neutralizes the free option.
 3. **Matching + relay server** (§6) — signed intents, crossing, relay; flat-file registry. This is
    also what makes the soft fee real (the operator/LP registry enforces it operationally — §10.1).
 4. **Client** for both sides (self-custody wallet + swap executor).
-5. **Maker commitment bond** (§5.4) — closes the documented forfeit-griefing gap (symmetric bond).
+5. **Relay reputation** (§5.4) — mitigate maker grief by de-prioritizing makers that fail to fund
+   after matching (a symmetric commitment bond is unsound — see docs/maker-grief-analysis.md).
 6. **(Optional, later) `OP_CAT` PoC** — a credibility/demo spike, NOT a roadmap gate. Revisit only
    if there is real volume to defend *and* evidence the soft fee actually leaks. See §5.5.
 

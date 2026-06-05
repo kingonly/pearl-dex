@@ -55,6 +55,11 @@ export interface OrderBookConfig {
   minFeeBps: number;
   /** unix-seconds clock; injectable for deterministic tests. */
   now?: () => number;
+  /**
+   * Optional reputation gate: reject intents from a known griefing maker (see MakerReputation /
+   * docs/maker-grief-analysis.md). Returns false to refuse the order. Mitigation, not enforcement.
+   */
+  allowMaker?: (makerPubkeyHex: string) => boolean;
 }
 
 const pairKey = (p: Pair) => `${p.base}/${p.quote}`;
@@ -99,6 +104,7 @@ export class OrderBook {
     if (intent.limitPriceSatPerUnit <= 0n) return 'non-positive price';
     if (intent.feeBps < this.cfg.minFeeBps) return `fee below operator minimum (${this.cfg.minFeeBps} bps)`;
     if (intent.expiry <= this.now()) return 'expired';
+    if (this.cfg.allowMaker && !this.cfg.allowMaker(hx(intent.makerPubkey))) return 'maker reputation';
     if (!verifyIntent(intent, sig)) return 'bad signature';
     return null;
   }

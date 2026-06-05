@@ -55,6 +55,12 @@ export {
 } from './OrderBook.js';
 
 export {
+  MakerReputation,
+  type ReputationConfig,
+  type MakerStats,
+} from './MakerReputation.js';
+
+export {
   deriveAmounts,
   proposeTimeouts,
   validateProposedTimeouts,
