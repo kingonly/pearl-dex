@@ -28,9 +28,16 @@ add the bond economics.
 - The **taker option bond** (DESIGN.md §5.3) is a sensible *composition* of proven primitives
   (hashlock, CLTV, Komodo-style deposits) — but it is **not a single named protocol with a track
   record.** It is new code implementing well-understood ideas.
-- **Correction (do not over-claim):** we do NOT ship a bilateral "maker commitment bond." We proved
-  it can't be made sound with hashlocks — the maker-grief and taker-walk stalls are
-  on-chain-indistinguishable, so a symmetric bond cancels the option bond (see
+- **Do not over-claim the bond's effect.** The bond *prices* the free option (makes a walk cost the
+  bond); it does not eliminate it. A walker still profits whenever the option value `0.4·σ·√T·S`
+  exceeds the bond, and a flat-bps bond under-covers above ~100–150% annualized vol. Correct sizing
+  scales the bond with `σ·√T` (and/or adds a short forced-decision window) — a **tracked refinement**;
+  v1 ships a flat-bps bond. So "rational players consummate immediately" is contingent on sizing, not
+  automatic.
+- **We do NOT ship a bilateral "maker commitment bond."** It can't be made sound with hashlocks: to a
+  same-chain hashlock script the maker-grief and taker-walk stalls look identical (the distinguisher —
+  did the maker fund dest — is a fact on the *other* chain a leaf can't read, and a plain HTLC can't
+  force the funding tx to reveal a secret), so a symmetric bond cancels the option bond (see
   docs/maker-grief-analysis.md). The residual maker-grief risk (a taker can lose its ~1–2% bond to a
   first-time grief; principal always safe) is mitigated at the coordination layer (relay reputation),
   not cryptographically. The cryptographic close is the OP_CAT covenant (optional, §5.5).
@@ -41,14 +48,33 @@ add the bond economics.
 
 - **Not needed for the bond.** The secret-tied bond is self-enforcing — whoever spends the forfeit
   leaf is its beneficiary, so there is nothing for a covenant to enforce (DESIGN.md §5.5).
-- **Not the fee's moat.** A covenant could hard-bind the fee output, but the realistic LP-registry
-  model already enforces the fee operationally; the covenant only bites in LP-less user-to-user
-  swaps. Defensibility is liquidity + UX + default-venue, not script lock-in.
+- **Not the fee's moat — but be honest about what that costs.** The fee is a **frontend fee**
+  (MetaMask/Uniswap-interface model): an output baked into the dest claim the operator's client
+  builds, collected from everyone who uses the operator's site. A covenant is the *only* thing that
+  would make it unforkable even against a pro running their own client+relay. Without it the fee is
+  bypassable by sophisticated users; defensibility is liquidity + UX + being the default frontend, not
+  script lock-in. Demoting OP_CAT = accepting a frontend fee, not a hard toll — stated plainly.
 - **Highest risk in the project.** `OP_CAT` covenants are demonstrated in research/testnets but **not
   live on Bitcoin mainnet** and run **no production value at scale** via pure-sighash-reconstruction;
   on Pearl's exact engine it's untrodden. Not worth gating anything on.
 - **Kept only as a possible later demo** — "what Pearl can do that Bitcoin can't," a credibility
   artifact for the Pearl relationship, never a dependency. The venue stands fully on Layers 1–2.
+
+## Monetization risk (separate from settlement risk)
+
+The layers above are about *can funds be stolen* — and on that axis settlement is sound. The **business
+premise** carries its own, larger risk that's easy to under-state:
+
+- The fee is a **frontend fee**, not a protocol-enforced toll (Layer 3). It collects from users of the
+  operator's site (most flow), but a sophisticated actor can settle peer-to-peer and pay nothing. Real
+  only to the extent the operator owns the default frontend.
+- Revenue = take-rate × volume, and **volume is the open question**, gated entirely by Pearl's success.
+  This is a leveraged bet on Pearl, side-business-scale until/unless PRL has real volume.
+- The bond economics (Layer 2) need `σ·√T`-aware sizing before a high-vol launch pair is safe to LP
+  against at scale.
+
+None of these threaten user funds; they threaten whether the venue *makes money*. Stated here so the
+maturity picture isn't read as "settlement is proven, therefore the project is proven."
 
 ---
 

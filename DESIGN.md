@@ -15,14 +15,18 @@ This document is the protocol spec. For an honest maturity/risk breakdown see `M
 - Trustless settlement: principal is protected cryptographically (hashlock + timelock); a
   counterparty can at worst waste your time, never steal your money.
 - Operator carries **zero inventory and zero float** — it is infrastructure, not a market maker.
-- Economically sound per-trade: the **free-option problem** is neutralized by forfeitable bonds,
-  so makers are not bled by adverse selection.
+- Economically sound per-trade: the **free-option problem** is *priced* by forfeitable bonds (made a
+  paid option, not a free one) so makers are less exposed to adverse selection — contingent on
+  `σ·√T`-aware bond sizing (§5.3).
 
 **Non-goals**
 - Not a custodial exchange (no KYC/MTL surface from holding funds).
 - Not a wrapped/pegged-asset bridge (that reintroduces a federated custodian — see Liquid's peg).
 - Not an on-chain order book or AMM (Pearl is UTXO/taproot, no smart-contract layer).
-- No price oracle in v1 — makers set their own limit prices; the venue only matches intents.
+- No price oracle — ever, by design. It's a limit order book: price is *discovered* by crossing
+  signed orders, so the venue needs no oracle (and Pearl has no contracts for an on-chain one anyway).
+  The only component that wants a price is a third-party LP deciding where to quote, which brings its
+  *own* off-chain feed (`MarketMaker`'s `refPrice`) — an LP concern, not the operator's.
 
 ---
 
@@ -124,8 +128,15 @@ forfeit leaf : <bond_timeout> OP_CHECKLOCKTIMEVERIFY OP_DROP <Bob_pk> OP_CHECKSI
 - If Alice **walks** (exercises the option), `x` is never revealed → she cannot reclaim, and Bob
   takes the bond after `bond_timeout`. The forfeited bond **compensates the optioned maker**.
 
-Set bond ≈ option value (~1–2% of notional) and the option is struck deep out-of-the-money;
-rational Alice never griefs. **This needs only hashlock + CLTV — Pearl supports it today, no covenant.**
+The bond converts a *free* option into a *paid* one: it caps the walker's gain by making her forfeit
+the bond when she walks. **It does not by itself eliminate the option** — Alice still rationally
+consummates only while `bond ≥ option_value`. Since option value scales as `0.4·σ·√T·S` while a
+flat-bps bond is constant in `σ` and `T`, a flat bond under-covers a sufficiently volatile pair or
+long window (above ~100–150% annualized vol at a 1–2% bond, the option can exceed the bond and a
+profitable walk re-opens). **So correct sizing must scale the bond with `σ·√T`** (and/or impose a
+short forced-decision window decoupled from the long reorg-safety refund) — a tracked refinement; v1
+ships a flat-bps bond as the mechanism. This needs only hashlock + CLTV — **Pearl supports it today,
+no covenant.**
 
 ### 5.4 The maker-grief gap — and why a commitment bond can't close it (corrected)
 
@@ -133,11 +144,15 @@ The maker can also grief: accept the match, wait for the taker to lock source + 
 never fund dest and forfeit-claim the taker's bond (~1–2% profit; the taker's principal is safe via
 refund). An earlier draft proposed a symmetric "maker commitment bond" (Komodo "both deposit") as the
 fix. **On analysis that is wrong** — see [`docs/maker-grief-analysis.md`](./docs/maker-grief-analysis.md)
-for the proof. The two stalls — *taker walk* and *maker never funds dest* — are
-**on-chain-indistinguishable** (in both, the preimage is never revealed; the dest leg is on the other
-chain). A bond keyed on that trigger fires identically in both, so a symmetric maker bond simply
-*cancels* the option bond in the walk case too, re-opening the free option. You cannot gate a
-forfeiture on an **omission** (not funding) with hashlocks — omissions reveal no secret.
+for the proof. To a **same-chain hashlock script**, the two stalls — *taker walk* and *maker never
+funds dest* — are indistinguishable: in both the preimage is never revealed, and a leaf can only gate
+on a secret or a local CLTV. The genuine distinguisher (did the maker fund dest?) is a fact on the
+*other* chain, which no taproot leaf can read. And you cannot make the *funding* event itself reveal a
+secret with a plain HTLC (funding creates an output; there is no witness to carry a secret). So a
+bond keyed on "preimage not revealed" fires identically in both cases — a symmetric maker bond simply
+*cancels* the option bond in the walk case too, re-opening the free option. Closing it requires a
+covenant that can either read cross-chain state or constrain how the dest funding tx is formed —
+hence the OP_CAT note below is the one place a covenant has unique value.
 
 The real closes: an **OP_CAT covenant** binding the maker's forfeit to proof it funded dest (the one
 place the demoted §5.5 covenant has unique value); a **Lightning-style pre-signed penalty** (big
@@ -146,10 +161,13 @@ de-prioritizes makers that fail to fund after matching; griefing costs an LP its
 the bond it could steal). **v1 ships the taker option bond + relay reputation, and does NOT ship a
 symmetric commitment bond** (it would silently re-open the free-option hole §5.3 exists to close).
 
-> **Key property:** the bond breaks the safety-vs-window tension. Refund timelocks stay long for
-> reorg safety, but because walking forfeits the bond, rational players consummate immediately,
-> collapsing the *effective* option window toward one-chain confirmation time. We get the cheap
-> corner of the option-cost table by economics, not by weakening safety.
+> **Intended property (with correct sizing):** the bond decouples the *price-exposure* window from
+> the *reorg-safety* refund window. Refund timelocks stay long for reorg safety; the bond makes a walk
+> cost `bond`, so as long as `bond ≥ option_value(T)` a rational player consummates immediately rather
+> than holding the option for the full refund window. The catch (§5.3): this only holds when the bond
+> actually dominates the option — a flat-bps bond doesn't for high `σ·√T`, so the "consummate
+> immediately" property is contingent on `σ·√T`-aware sizing, not automatic. Nothing in the *script*
+> forces early reveal; it's an economic incentive that binds only when the bond is sized right.
 
 ### 5.5 `OP_CAT` enhancement (NOT a dependency — optional future PoC, see MATURITY.md §3)
 
@@ -228,7 +246,7 @@ is **load-bearing for safety** and part of v1.
    two-user on-chain HTLC swap end-to-end (the swap itself is already proven cross-chain).
 2. **Taker option bond** (§5.3) — pure hashlock+CLTV leaves, no covenant. Neutralizes the free option.
 3. **Matching + relay server** (§6) — signed intents, crossing, relay; flat-file registry. This is
-   also what makes the soft fee real (the operator/LP registry enforces it operationally — §10.1).
+   also the frontend that collects the fee (baked into the dest claim the client builds — §10.1).
 4. **Client** for both sides (self-custody wallet + swap executor).
 5. **Relay reputation** (§5.4) — mitigate maker grief by de-prioritizing makers that fail to fund
    after matching (a symmetric commitment bond is unsound — see docs/maker-grief-analysis.md).
@@ -251,18 +269,23 @@ A small fee (bps of trade size, with a floor) paid to the operator's address as 
 settlement — the taker bears it. The operator is never in the money flow; the fee is just an
 output. Enforcement in tiers:
 
-- **v1 — soft, and the actual plan:** the fee is enforced *operationally*, not in script. `feeBps` is
-  a signed field of the `OrderIntent` so it can't be silently stripped (§10.3); the reference client
-  includes the fee (an extra output in the dest-leg claim, or a standalone `buildFeeTx` Komodo
-  "dexfee" tx); and — the load-bearing part — **the LP/maker won't fund the dest leg without a
-  committed fee** (§10.2). Since liquidity comes from registered LP daemons, the operator's fee is a
-  relationship with the LP, not something a taker can route around. Defensibility is liquidity
-  concentration + UX + being the default venue, not protocol lock-in (an open venue is forkable
-  regardless of chain).
+- **v1 — the frontend fee (the actual plan), like a non-custodial DEX frontend.** This is the
+  MetaMask-swap / Uniswap-interface model: the fee is **an extra output baked into the taker's
+  dest-leg claim** — the tx the user's own signer signs — collected only on consummation (no fill, no
+  fee). It is wired in today (`SwapExecutor` appends `plan.operatorFee` to the dest claim; `feeBps` is
+  a signed `OrderIntent` field §10.3, so the matcher only crosses fee-bearing orders). Enforcement is
+  *client-side*, not script-side: it collects from everyone who uses the operator's site/client —
+  which is ~everyone — and a sophisticated user running a forked client against their own relay can
+  bypass it (the venue is open-source and settlement is peer-to-peer). **So the toll booth is owning
+  the default frontend, not custody and not a wallet.** Be honest that this means the fee is a
+  frontend fee, not a protocol-enforced toll; defensibility is liquidity concentration + UX + being
+  the default venue, plus first-mover on Pearl.
 - **v2 — hard, OP_CAT, NOT planned (see §5.5):** a covenant *could* make the dest-leg claim
-  unspendable unless it pays the fee. This is the only thing a covenant uniquely adds, and it only
-  bites in true user-to-user swaps with no LP enforcing the fee. Given the speculative cost of
-  `OP_CAT` covenants, this is parked as an optional future PoC, not the fee's moat.
+  unspendable unless it pays the fee — the **only** mechanism that makes the fee unforkable even
+  against a pro running their own client. It only bites in true user-to-user swaps (an LP in the
+  middle already won't fund without its agreed economics). Given the speculative cost of `OP_CAT`
+  covenants it is parked as an optional future PoC — but note the trade-off plainly: **without it the
+  fee is a (bypassable) frontend fee, not a hard toll.**
 
 The fee is carried as a committed term of the `SwapPlan` (`operatorFee`), so it travels with the
 swap layout both parties derive.
@@ -295,5 +318,6 @@ Revenue = take-rate × volume, and volume is gated by Pearl's success — this i
 Pearl**, side-business-scale until/unless PRL has real volume. The early asset is *owning the default
 venue* (strategic/acquisition value, or a token later), not the fee stream. The pure-P2P design
 trades away easy monetization and liquidity UX for zero capital; §10.2 (third-party LPs) + owning the
-wallet/UX are the levers that make the fee actually materialize. See `docs/free-option-analysis.md`
+default *frontend* (the toll booth — a DEX site, not a wallet) are the levers that make the fee
+actually materialize. See `docs/free-option-analysis.md`
 for why each *trade* is sound; the open risk is *volume*, not the mechanism.
