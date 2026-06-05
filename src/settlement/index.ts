@@ -18,6 +18,10 @@ export type {
   SpendDetection,
 } from './ChainClient.js';
 
+export { RpcChainClient, type RpcConfig, type NormTx } from './RpcChainClient.js';
+export { BitcoinClient } from './BitcoinClient.js';
+export { PearlClient } from './PearlClient.js';
+
 export {
   buildSwapLeg,
   buildClaimTx,
