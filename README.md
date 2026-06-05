@@ -11,7 +11,12 @@ A **trustless, non-custodial, peer-to-peer exchange** between **Pearl (PRL)** an
 
 ## Status
 
-Early design + scaffold. **Read [`DESIGN.md`](./DESIGN.md) for the protocol** and [`MATURITY.md`](./MATURITY.md) for an honest, layer-by-layer assessment of what is battle-tested vs. novel vs. experimental.
+Settlement core + the free-option bond are built and tested (10 tests, typecheck clean).
+
+- **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the new secret-tied `Bond`; the `SwapPlan` two-user layout; a full two-user BTC→PRL E2E (happy + walk/forfeit paths) against scripted in-memory chains with real transaction construction.
+- **Next:** P2P coordinator state machine + persistent fee-bumped watcher (`src/coordination`), the maker commitment bond, live simnet/signet E2E, then the matching/relay server. See `DESIGN.md` §9.
+
+**Read [`DESIGN.md`](./DESIGN.md) for the protocol** and [`MATURITY.md`](./MATURITY.md) for an honest, layer-by-layer assessment of what is battle-tested vs. novel vs. experimental.
 
 ## Architecture
 
