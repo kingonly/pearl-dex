@@ -146,12 +146,14 @@ The bond timelocks sit in a strict ladder so a walk is penalizable but principal
 ```
 
 > **Honest status.** The *mechanism* is implemented and tested; bonds enforced this way are lightly
-> deployed in the wild (Komodo-style). Two caveats we don't hide: (1) the bond is currently sized as
-> a flat % of notional, while option value scales with volatility and window — for a very volatile
-> pair or a long window the option can exceed a flat bond, so **σ·√T-aware sizing is a tracked
-> refinement**; (2) a *maker* who accepts-then-never-funds can grief a taker out of its (~1–2%)
-> bond — principal is always safe, and this is mitigated by reputation, not yet closed cryptographically.
-> See [`MATURITY.md`](./MATURITY.md) and [`docs/maker-grief-analysis.md`](./docs/maker-grief-analysis.md).
+> deployed in the wild (Komodo-style). The bond is sized **conservatively to dominate the option**:
+> `bond = max(flat-floor, safety · 0.4 · σ · √T · notional)` with deliberately pessimistic defaults
+> (σ = 300% annualized, 2× safety; see `src/settlement/FreeOption.ts`), so a walk is never profitable
+> even for a volatile pair — erring large only costs an honest taker locked capital for the swap
+> window, which it always gets back. One caveat we don't hide: a *maker* who accepts-then-never-funds
+> can grief a taker out of its bond — principal is always safe, and this is mitigated by reputation,
+> not yet closed cryptographically. See [`MATURITY.md`](./MATURITY.md) and
+> [`docs/maker-grief-analysis.md`](./docs/maker-grief-analysis.md).
 
 ---
 

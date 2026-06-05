@@ -28,12 +28,13 @@ add the bond economics.
 - The **taker option bond** (DESIGN.md §5.3) is a sensible *composition* of proven primitives
   (hashlock, CLTV, Komodo-style deposits) — but it is **not a single named protocol with a track
   record.** It is new code implementing well-understood ideas.
-- **Do not over-claim the bond's effect.** The bond *prices* the free option (makes a walk cost the
-  bond); it does not eliminate it. A walker still profits whenever the option value `0.4·σ·√T·S`
-  exceeds the bond, and a flat-bps bond under-covers above ~100–150% annualized vol. Correct sizing
-  scales the bond with `σ·√T` (and/or adds a short forced-decision window) — a **tracked refinement**;
-  v1 ships a flat-bps bond. So "rational players consummate immediately" is contingent on sizing, not
-  automatic.
+- **The bond is sized to dominate the option (conservative, implemented).** A walker profits only if
+  the option value `0.4·σ·√T·S` exceeds the bond, so the bond is sized as
+  `max(flat_floor, safety · 0.4 · σ · √T · notional)` with deliberately pessimistic defaults (σ = 300%,
+  2× safety; `src/settlement/FreeOption.ts`, applied in `deriveAmounts` when the exposure window is
+  known) and capped at the notional. This over-collateralizes rather than under-covers — "no risks,"
+  at the cost of an honest taker locking more capital for the swap window (always returned). Residual:
+  the σ default is a static assumption, not a live vol feed; lower it only with real data for the pair.
 - **We do NOT ship a bilateral "maker commitment bond."** It can't be made sound with hashlocks: to a
   same-chain hashlock script the maker-grief and taker-walk stalls look identical (the distinguisher —
   did the maker fund dest — is a fact on the *other* chain a leaf can't read, and a plain HTLC can't
@@ -70,8 +71,8 @@ premise** carries its own, larger risk that's easy to under-state:
   only to the extent the operator owns the default frontend.
 - Revenue = take-rate × volume, and **volume is the open question**, gated entirely by Pearl's success.
   This is a leveraged bet on Pearl, side-business-scale until/unless PRL has real volume.
-- The bond economics (Layer 2) need `σ·√T`-aware sizing before a high-vol launch pair is safe to LP
-  against at scale.
+- The bond economics (Layer 2) use conservative `σ·√T`-aware sizing with a pessimistic static vol
+  assumption; a live volatility feed would let LPs price tighter without taking option risk.
 
 None of these threaten user funds; they threaten whether the venue *makes money*. Stated here so the
 maturity picture isn't read as "settlement is proven, therefore the project is proven."

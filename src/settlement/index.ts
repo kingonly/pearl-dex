@@ -53,13 +53,25 @@ export {
 export { buildP2trKeyPathSpend, type KeyPathInput, type TxOutputSpec } from './Funder.js';
 
 export {
+  optionValueSat,
+  conservativeBondSat,
+  SECONDS_PER_YEAR,
+  OPTION_VALUE_CONSTANT,
+  CONSERVATIVE_ANNUALIZED_VOL,
+  CONSERVATIVE_BOND_SAFETY,
+} from './FreeOption.js';
+
+export {
   PEARL_TIMING,
   SIGNET_TIMING,
   computeSwapTimeouts,
   computeBondForfeitHeight,
   assertSafeTimeouts,
+  assertSafeBondTimeout,
   blocksForDuration,
   secondsForBlocks,
+  DEFAULT_SHORT_REFUND_SECONDS,
+  DEFAULT_MARGIN_SECONDS,
   type ChainTiming,
   type SwapTimeouts,
 } from './Timelocks.js';

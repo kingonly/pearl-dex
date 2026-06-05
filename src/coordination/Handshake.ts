@@ -8,6 +8,7 @@ import {
   type ChainTiming,
 } from '../settlement/Timelocks.js';
 import { buildFeeOutput, computeFeeSat, type FeePolicy } from '../settlement/Fee.js';
+import { conservativeBondSat } from '../settlement/FreeOption.js';
 import type { Match } from './OrderBook.js';
 import type { SwapParamsJSON } from './SwapStore.js';
 
@@ -30,10 +31,28 @@ export interface SwapNetworks {
   quote: BTC_NETWORK;
 }
 
-/** Bond sizing: a fraction of the quote (BTC) trade value, with a floor. ~1–2% covers the option. */
+/**
+ * Bond sizing. Two lower bounds are always applied, and the LARGER wins:
+ *   - a flat fraction of the quote (BTC) notional (`bps`) with a floor (`minSat`); and
+ *   - (when the swap's exposure window is known — the client supplies it) a conservative,
+ *     volatility-aware size that DOMINATES the free-option value `0.4·σ·√T·notional` × safety, so a
+ *     taker walk is never profitable (DESIGN.md §5.3, `FreeOption.ts`).
+ *
+ * "No risks" default: the volatility-aware size uses pessimistic high-vol assumptions, so the bond
+ * over-collateralizes the option rather than under-covering it. Set `volatility` to tune.
+ */
 export interface BondPolicy {
+  /** flat fraction of notional in basis points — a lower bound, always applied. */
   bps: number;
+  /** floor in sats so dust trades still post a meaningful bond. */
   minSat: bigint;
+  /** conservative volatility-aware sizing knobs; conservative defaults used when omitted. */
+  volatility?: {
+    /** annualized vol assumption (e.g. 3.0 = 300%). Defaults to CONSERVATIVE_ANNUALIZED_VOL. */
+    annualizedVol?: number;
+    /** safety multiple over the computed option value. Defaults to CONSERVATIVE_BOND_SAFETY. */
+    safetyMultiple?: number;
+  };
 }
 
 export interface SwapAmounts {
@@ -67,11 +86,36 @@ export type HandshakeMessage =
 const hx = (b: Uint8Array) => Buffer.from(b).toString('hex');
 const maxBig = (a: bigint, b: bigint) => (a > b ? a : b);
 
-/** Derive the per-leg amounts (and bond) for a match. */
-export function deriveAmounts(match: Match, bond: BondPolicy): SwapAmounts {
+/**
+ * Derive the per-leg amounts (and bond) for a match.
+ *
+ * `exposureWindowSeconds` is the taker's option life — the wall-clock the taker can hold before it
+ * must consummate (the dest refund window). When supplied, the bond is ALSO sized to dominate the
+ * free-option value over that window (conservative high-vol defaults), and the larger of the flat-bps
+ * and volatility-aware sizes is used — so walking is never profitable. Both parties must derive the
+ * same bond, so pass the venue's published bond policy + window (the same value that sets the dest
+ * timeout); without it the bond falls back to flat-bps + floor only.
+ */
+export function deriveAmounts(
+  match: Match,
+  bond: BondPolicy,
+  opts: { exposureWindowSeconds?: number } = {},
+): SwapAmounts {
   const sourceSat = match.fillQuoteSat; // BTC the taker funds
   const destSat = match.fillBaseSat; // PRL the maker funds
-  const bondSat = maxBig(bond.minSat, (sourceSat * BigInt(bond.bps)) / 10_000n);
+  let bondSat = maxBig(bond.minSat, (sourceSat * BigInt(bond.bps)) / 10_000n);
+  if (opts.exposureWindowSeconds !== undefined) {
+    bondSat = maxBig(
+      bondSat,
+      conservativeBondSat({
+        notionalSat: sourceSat,
+        windowSeconds: opts.exposureWindowSeconds,
+        annualizedVol: bond.volatility?.annualizedVol,
+        safetyMultiple: bond.volatility?.safetyMultiple,
+        floorSat: bond.minSat,
+      }),
+    );
+  }
   return { sourceSat, destSat, bondSat };
 }
 

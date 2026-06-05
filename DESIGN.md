@@ -15,9 +15,9 @@ This document is the protocol spec. For an honest maturity/risk breakdown see `M
 - Trustless settlement: principal is protected cryptographically (hashlock + timelock); a
   counterparty can at worst waste your time, never steal your money.
 - Operator carries **zero inventory and zero float** — it is infrastructure, not a market maker.
-- Economically sound per-trade: the **free-option problem** is *priced* by forfeitable bonds (made a
-  paid option, not a free one) so makers are less exposed to adverse selection — contingent on
-  `σ·√T`-aware bond sizing (§5.3).
+- Economically sound per-trade: the **free-option problem** is *priced out* by forfeitable bonds
+  sized to dominate the option value (conservative `σ·√T` sizing, §5.3), so a walk is never profitable
+  and makers are protected from adverse selection.
 
 **Non-goals**
 - Not a custodial exchange (no KYC/MTL surface from holding funds).
@@ -128,15 +128,22 @@ forfeit leaf : <bond_timeout> OP_CHECKLOCKTIMEVERIFY OP_DROP <Bob_pk> OP_CHECKSI
 - If Alice **walks** (exercises the option), `x` is never revealed → she cannot reclaim, and Bob
   takes the bond after `bond_timeout`. The forfeited bond **compensates the optioned maker**.
 
-The bond converts a *free* option into a *paid* one: it caps the walker's gain by making her forfeit
-the bond when she walks. **It does not by itself eliminate the option** — Alice still rationally
-consummates only while `bond ≥ option_value`. Since option value scales as `0.4·σ·√T·S` while a
-flat-bps bond is constant in `σ` and `T`, a flat bond under-covers a sufficiently volatile pair or
-long window (above ~100–150% annualized vol at a 1–2% bond, the option can exceed the bond and a
-profitable walk re-opens). **So correct sizing must scale the bond with `σ·√T`** (and/or impose a
-short forced-decision window decoupled from the long reorg-safety refund) — a tracked refinement; v1
-ships a flat-bps bond as the mechanism. This needs only hashlock + CLTV — **Pearl supports it today,
-no covenant.**
+The bond converts a *free* option into a *paid* one: Alice forfeits it when she walks, so she only
+rationally consummates while `bond ≥ option_value`. A flat-% bond does **not** guarantee that — option
+value scales as `0.4·σ·√T·S` while a flat bond is constant — so we **size the bond to dominate the
+option** (`src/settlement/FreeOption.ts`, implemented):
+
+```
+bond = max( flat_floor,  safety · 0.4 · σ · √T · S )
+```
+
+`deriveAmounts` takes the larger of the flat-bps floor and this conservative size whenever the swap's
+exposure window `T` is known (the dest refund window the taker can hold for). **Conservative ("no
+risks") defaults: σ = 300% annualized, safety = 2×** — deliberately pessimistic so the bond
+over-covers any plausible option value over the window. The bond is capped at the notional (never bond
+more than you trade) and is only ever posted+reclaimed by an honest taker, so erring large costs an
+honest user nothing but locked capital for the swap window. This needs only hashlock + CLTV — **Pearl
+supports it today, no covenant.**
 
 ### 5.4 The maker-grief gap — and why a commitment bond can't close it (corrected)
 
@@ -161,13 +168,13 @@ de-prioritizes makers that fail to fund after matching; griefing costs an LP its
 the bond it could steal). **v1 ships the taker option bond + relay reputation, and does NOT ship a
 symmetric commitment bond** (it would silently re-open the free-option hole §5.3 exists to close).
 
-> **Intended property (with correct sizing):** the bond decouples the *price-exposure* window from
-> the *reorg-safety* refund window. Refund timelocks stay long for reorg safety; the bond makes a walk
-> cost `bond`, so as long as `bond ≥ option_value(T)` a rational player consummates immediately rather
-> than holding the option for the full refund window. The catch (§5.3): this only holds when the bond
-> actually dominates the option — a flat-bps bond doesn't for high `σ·√T`, so the "consummate
-> immediately" property is contingent on `σ·√T`-aware sizing, not automatic. Nothing in the *script*
-> forces early reveal; it's an economic incentive that binds only when the bond is sized right.
+> **Property (with the conservative sizing we now ship):** the bond decouples the *price-exposure*
+> window from the *reorg-safety* refund window. Refund timelocks stay long for reorg safety; the bond
+> makes a walk cost `bond`, so as long as `bond ≥ option_value(T)` a rational player consummates
+> immediately rather than holding the option for the full refund window. Because the bond is sized to
+> *dominate* the option (§5.3, `FreeOption.ts`, conservative high-vol defaults), that inequality holds
+> by construction. Nothing in the *script* forces early reveal — it's an economic incentive — but with
+> a dominating bond the incentive binds.
 
 ### 5.5 `OP_CAT` enhancement (NOT a dependency — optional future PoC, see MATURITY.md §3)
 

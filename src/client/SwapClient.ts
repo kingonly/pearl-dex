@@ -1,7 +1,7 @@
 import { pubSchnorr, sha256 } from '@scure/btc-signer/utils.js';
 import type { Signer } from '../signer/index.js';
 import type { ChainClient } from '../settlement/ChainClient.js';
-import type { ChainTiming } from '../settlement/Timelocks.js';
+import { DEFAULT_SHORT_REFUND_SECONDS, type ChainTiming } from '../settlement/Timelocks.js';
 import { makePreimage } from '../settlement/SwapTree.js';
 import type { FeePolicy } from '../settlement/Fee.js';
 import {
@@ -226,7 +226,9 @@ export class SwapClient {
         timeouts,
         fee: this.deps.config.fee,
       });
-      const amounts = deriveAmounts(p.match, this.deps.config.bond);
+      const amounts = deriveAmounts(p.match, this.deps.config.bond, {
+        exposureWindowSeconds: this.exposureWindowSeconds(),
+      });
       this.pending.delete(m.from);
       this.launch(newMakerRecord({ id: p.id, params, amounts }));
     } else if (msg.type === 'maker_ack' && p.role === 'taker') {
@@ -240,7 +242,9 @@ export class SwapClient {
         timeouts: msg.timeouts,
         fee: this.deps.config.fee,
       });
-      const amounts = deriveAmounts(p.match, this.deps.config.bond);
+      const amounts = deriveAmounts(p.match, this.deps.config.bond, {
+        exposureWindowSeconds: this.exposureWindowSeconds(),
+      });
       this.pending.delete(m.from);
       this.launch(newTakerRecord({ id: p.id, params, preimage: p.preimage!.preimage, amounts }));
     } else {
@@ -267,6 +271,16 @@ export class SwapClient {
     const handle: SwapHandle = { id: record.id, role: record.role, params: record.params, done };
     this.handles.set(record.id, handle);
     return handle;
+  }
+
+  /**
+   * The taker's option life for conservative bond sizing — the wall-clock it can hold before it must
+   * consummate, i.e. the dest refund window (`shortRefundSeconds`). Using the configured window (not
+   * an observed height delta) keeps the bond deterministic across both parties under shared venue
+   * params. The same value sets the dest timeout, so the bond covers the real exposure.
+   */
+  private exposureWindowSeconds(): number {
+    return this.deps.config.shortRefundSeconds ?? DEFAULT_SHORT_REFUND_SECONDS;
   }
 
   private send(to: string, payload: HandshakeMessage): void {
