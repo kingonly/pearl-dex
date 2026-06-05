@@ -75,6 +75,8 @@ export {
   type SerializedMatch,
 } from './Relay.js';
 
+export { WsRelayServer, connectWsRelay } from './WsRelay.js';
+
 export {
   FileRegistry,
   type RegistryData,
