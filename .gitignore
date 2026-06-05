@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+# private keys, RPC creds, chain datadirs — NEVER commit
+backends/*
+!backends/README.md
+*-key.json
+*.key
+.DS_Store
