@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      document.documentElement.classList.add("js");
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pearl·dex — live market</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --page: #0b0b0d;
+        --surface-1: #101116;
+        --surface-2: #16171e;
+        --border: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.14);
+        --fg-1: #f4f3ef;
+        --fg-2: #a7a8a2;
+        --fg-3: #75766f;
+        --fg-4: #4a4b46;
+        --btc: #f7931a;
+        --pearl-a: #7fe7e0;
+        --pearl-b: #9fb4ff;
+        --pearl-c: #c9a8ff;
+        --bid: #4cc38a;
+        --ask: #f0616d;
+        --font-body: "Inter", system-ui, sans-serif;
+        --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+        --ease-ui: cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--fg-1);
+        font: 400 15px/1.5 var(--font-body);
+        letter-spacing: 0.01em;
+      }
+      .num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+      a { color: inherit; text-decoration: none; }
+      .pearl-dot {
+        background: conic-gradient(from 210deg, var(--pearl-a), var(--pearl-b), var(--pearl-c), var(--pearl-a));
+        box-shadow: 0 0 14px color-mix(in srgb, var(--pearl-b) 50%, transparent);
+        border-radius: 50%;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface-1);
+        flex-wrap: wrap;
+      }
+      .brand { display: flex; align-items: center; gap: 11px; font-weight: 500; letter-spacing: -0.01em; }
+      .brand .pearl-dot { width: 16px; height: 16px; }
+      .brand b { font-weight: 600; }
+      .brand .tag {
+        margin-left: 12px; padding: 4px 10px; border: 1px solid var(--border);
+        border-radius: 999px; font-size: 12px; color: var(--fg-3);
+      }
+      .status { display: flex; align-items: center; gap: 18px; font-size: 13px; color: var(--fg-2); }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-4); display: inline-block; margin-right: 7px; }
+      .dot.on { background: var(--bid); box-shadow: 0 0 10px color-mix(in srgb, var(--bid) 60%, transparent); }
+      .last { font-size: 14px; }
+      .last .v { font-weight: 600; }
+
+      main {
+        display: grid;
+        grid-template-columns: 1.3fr 1fr;
+        gap: 20px;
+        padding: 24px;
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+      @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+
+      .panel { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); overflow: hidden; }
+      .panel > h2 {
+        margin: 0; padding: 15px 18px; font-size: 13px; font-weight: 500; color: var(--fg-3);
+        letter-spacing: 0.02em; border-bottom: 1px solid var(--border);
+        display: flex; justify-content: space-between; align-items: center;
+      }
+      .panel > h2 .pair { color: var(--fg-1); font-weight: 600; }
+
+      /* order book */
+      .ob-head, .row {
+        display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+        padding: 5px 18px; font-size: 13px;
+      }
+      .ob-head { color: var(--fg-4); font-size: 11.5px; padding-top: 12px; padding-bottom: 8px; }
+      .ob-head span:nth-child(2), .ob-head span:nth-child(3) { text-align: right; }
+      .row { position: relative; }
+      .row .depth { position: absolute; top: 0; bottom: 0; right: 0; opacity: 0.12; }
+      .row.ask .depth { background: var(--ask); }
+      .row.bid .depth { background: var(--bid); }
+      .row span { position: relative; z-index: 1; }
+      .row .price { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+      .row.ask .price { color: var(--ask); }
+      .row.bid .price { color: var(--bid); }
+      .row .size, .row .total { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--fg-2); }
+      .spread {
+        padding: 11px 18px; margin: 8px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+        display: flex; justify-content: space-between; font-size: 13px; color: var(--fg-3);
+      }
+      .spread .mid { color: var(--fg-1); font-weight: 600; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+      .empty { padding: 40px 18px; text-align: center; color: var(--fg-4); font-size: 13.5px; }
+
+      /* trade tape */
+      .tape { max-height: 520px; overflow-y: auto; }
+      .trade {
+        display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px;
+        padding: 8px 18px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04);
+        animation: flashin 600ms var(--ease-ui);
+      }
+      @keyframes flashin { from { background: rgba(255,255,255,0.06); } to { background: transparent; } }
+      .trade .p { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+      .trade.up .p { color: var(--bid); }
+      .trade.down .p { color: var(--ask); }
+      .trade .s { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--fg-2); }
+      .trade .t { text-align: right; color: var(--fg-4); font-size: 12px; font-family: var(--font-mono); }
+
+      footer { padding: 20px 24px 36px; color: var(--fg-4); font-size: 12.5px; text-align: center; }
+      footer a { color: var(--fg-3); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <span class="pearl-dot"></span><span>pearl<b>·dex</b></span>
+        <span class="tag">live market · anonymized feed</span>
+      </div>
+      <div class="status">
+        <span class="last">last <span class="v num" id="last">—</span></span>
+        <span><span class="dot" id="conn-dot"></span><span id="conn">connecting…</span></span>
+      </div>
+    </header>
+
+    <main>
+      <div class="panel">
+        <h2><span class="pair" id="pair">PRL / BTC</span><span>order book · sats per PRL</span></h2>
+        <div class="ob-head"><span>price (sats)</span><span>size (PRL)</span><span>total</span></div>
+        <div id="asks"></div>
+        <div class="spread"><span>spread</span><span class="mid" id="mid">—</span></div>
+        <div id="bids"></div>
+        <div class="empty" id="ob-empty">waiting for liquidity…</div>
+      </div>
+
+      <div class="panel">
+        <h2><span>trades</span><span>most recent</span></h2>
+        <div class="tape" id="tape"><div class="empty" id="tape-empty">no prints yet</div></div>
+      </div>
+    </main>
+
+    <footer>
+      Read-only public feed — no identities, no custody. The operator relays; users settle peer-to-peer on-chain.
+      &nbsp;·&nbsp; <a href="index.html">about</a> &nbsp;·&nbsp;
+      <a href="https://github.com/kingonly/pearl-dex" target="_blank" rel="noopener">source ↗</a>
+    </footer>
+
+    <script>
+      const COIN = 100_000_000n;
+      const params = new URLSearchParams(location.search);
+      const RELAY = params.get("relay") || "ws://127.0.0.1:8730";
+
+      const fmtPrice = (s) => Number(s).toLocaleString("en-US");
+      const fmtSize = (s) => (Number(BigInt(s)) / 1e8).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+      const $ = (id) => document.getElementById(id);
+      let lastPrice = null;
+
+      function renderBook(book) {
+        const asks = book.asks.slice().reverse(); // show highest ask on top, lowest near spread
+        const bids = book.bids; // already high->low
+        const has = asks.length || bids.length;
+        $("ob-empty").style.display = has ? "none" : "block";
+
+        const maxCum = (rows) => {
+          let c = 0n, max = 0n;
+          for (const r of rows) { c += BigInt(r.baseSat); if (c > max) max = c; }
+          return max || 1n;
+        };
+        const render = (rows, side, fromSpread) => {
+          // cumulative total measured from the spread outward
+          const ordered = fromSpread ? rows : rows.slice().reverse();
+          let cum = 0n;
+          const withCum = ordered.map((r) => { cum += BigInt(r.baseSat); return { ...r, cum }; });
+          const max = cum || 1n;
+          const out = fromSpread ? withCum.slice().reverse() : withCum;
+          return out
+            .map(
+              (r) => `<div class="row ${side}"><div class="depth" style="width:${Number((r.cum * 100n) / max)}%"></div>` +
+                `<span class="price">${fmtPrice(r.priceSatPerUnit)}</span>` +
+                `<span class="size">${fmtSize(r.baseSat)}</span>` +
+                `<span class="total">${fmtSize(r.cum.toString())}</span></div>`,
+            )
+            .join("");
+        };
+        // asks: cumulative grows upward from spread; bids: downward from spread
+        $("asks").innerHTML = render(asks, "ask", false);
+        $("bids").innerHTML = render(bids, "bid", true);
+
+        const bestAsk = book.asks[0] ? BigInt(book.asks[0].priceSatPerUnit) : null;
+        const bestBid = book.bids[0] ? BigInt(book.bids[0].priceSatPerUnit) : null;
+        if (bestAsk && bestBid) {
+          const mid = (bestAsk + bestBid) / 2n;
+          $("mid").textContent = `${fmtPrice((bestAsk - bestBid).toString())} · mid ${fmtPrice(mid.toString())}`;
+        } else $("mid").textContent = "—";
+      }
+
+      function addTrade(ev) {
+        $("tape-empty")?.remove();
+        const dir = lastPrice === null ? "" : Number(ev.priceSatPerUnit) >= lastPrice ? "up" : "down";
+        lastPrice = Number(ev.priceSatPerUnit);
+        $("last").textContent = fmtPrice(ev.priceSatPerUnit);
+        const t = new Date().toLocaleTimeString("en-US", { hour12: false });
+        const row = document.createElement("div");
+        row.className = `trade ${dir}`;
+        row.innerHTML = `<span class="p">${fmtPrice(ev.priceSatPerUnit)}</span><span class="s">${fmtSize(ev.baseSat)} PRL</span><span class="t">${t}</span>`;
+        const tape = $("tape");
+        tape.insertBefore(row, tape.firstChild);
+        while (tape.children.length > 40) tape.removeChild(tape.lastChild);
+      }
+
+      function connect() {
+        const ws = new WebSocket(RELAY);
+        ws.onopen = () => {
+          $("conn").textContent = "live";
+          $("conn-dot").classList.add("on");
+          ws.send(JSON.stringify({ t: "subscribe" }));
+        };
+        ws.onmessage = (e) => {
+          let env;
+          try { env = JSON.parse(e.data); } catch { return; }
+          if (env.t !== "md") return;
+          if (env.ev.type === "snapshot") {
+            const b = env.ev.books.find((x) => x.pair.base === "PRL") || env.ev.books[0];
+            if (b) { $("pair").textContent = `${b.pair.base} / ${b.pair.quote}`; renderBook(b); }
+          } else if (env.ev.type === "trade") addTrade(env.ev);
+        };
+        ws.onclose = () => {
+          $("conn").textContent = "reconnecting…";
+          $("conn-dot").classList.remove("on");
+          setTimeout(connect, 1500);
+        };
+        ws.onerror = () => ws.close();
+      }
+      connect();
+    </script>
+  </body>
+</html>

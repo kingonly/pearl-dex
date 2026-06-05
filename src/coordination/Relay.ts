@@ -1,4 +1,4 @@
-import { OrderBook, type Match, type SubmitResult } from './OrderBook.js';
+import { OrderBook, type BookSnapshot, type Match, type SubmitResult } from './OrderBook.js';
 import type { OrderIntent, Pair } from './types.js';
 
 /**
@@ -28,6 +28,14 @@ export interface SerializedMatch {
 export type ServerMessage =
   | { type: 'match'; role: 'taker' | 'maker'; counterparty: string; match: SerializedMatch }
   | { type: 'peer'; from: string; payload: unknown };
+
+/**
+ * Public, anonymized market data — what a dashboard or any observer can see. No identities, no
+ * custody, no per-party state: just the resting book and the trades that print as intents cross.
+ */
+export type MarketEvent =
+  | { type: 'snapshot'; books: BookSnapshot[] }
+  | { type: 'trade'; pair: Pair; priceSatPerUnit: string; baseSat: string };
 
 export interface RelayConnection {
   /** this party's identity (x-only pubkey hex). */
@@ -60,8 +68,24 @@ const hx = (b: Uint8Array) => Buffer.from(b).toString('hex');
 
 export class RelayServer {
   private conns = new Map<string, Conn>();
+  private mdListeners = new Set<(e: MarketEvent) => void>();
 
   constructor(private readonly book: OrderBook) {}
+
+  /**
+   * Subscribe to the anonymized market-data feed (book snapshots + trade prints). Immediately
+   * pushes the current snapshot. Returns an unsubscribe fn. This is read-only and identity-free —
+   * the venue's public transparency surface.
+   */
+  subscribeMarketData(listener: (e: MarketEvent) => void): () => void {
+    this.mdListeners.add(listener);
+    listener({ type: 'snapshot', books: this.book.snapshotAll() });
+    return () => this.mdListeners.delete(listener);
+  }
+
+  private emitMarketData(e: MarketEvent): void {
+    for (const l of this.mdListeners) l(e);
+  }
 
   /** Open a connection for a party identified by its x-only identity pubkey (hex). */
   connect(id: string): RelayConnection {
@@ -87,6 +111,18 @@ export class RelayServer {
     }
     const result = this.book.submit(intent, sig);
     for (const m of result.matches) this.notifyMatch(m);
+    // Market data: print each trade, then push the updated book (orders rested and/or filled).
+    if (result.accepted && this.mdListeners.size) {
+      for (const m of result.matches) {
+        this.emitMarketData({
+          type: 'trade',
+          pair: m.pair,
+          priceSatPerUnit: m.executionPriceSatPerUnit.toString(),
+          baseSat: m.fillBaseSat.toString(),
+        });
+      }
+      this.emitMarketData({ type: 'snapshot', books: this.book.snapshotAll() });
+    }
     return result;
   }
 

@@ -1,6 +1,6 @@
 import { WebSocketServer, type WebSocket as WsServerSocket } from 'ws';
 import { RelayServer } from './Relay.js';
-import type { RelayConnection, ServerMessage } from './Relay.js';
+import type { MarketEvent, RelayConnection, ServerMessage } from './Relay.js';
 import type { OrderIntent, Pair, Side } from './types.js';
 import type { SubmitResult } from './OrderBook.js';
 
@@ -30,9 +30,10 @@ interface WireIntent {
 type ClientMsg =
   | { t: 'hello'; id: string }
   | { t: 'submit'; intent: WireIntent; sig: string }
-  | { t: 'peer'; to: string; payload: unknown };
+  | { t: 'peer'; to: string; payload: unknown }
+  | { t: 'subscribe' }; // market-data subscription (no identity needed)
 
-type ServerEnvelope = { t: 'server'; msg: ServerMessage };
+type ServerEnvelope = { t: 'server'; msg: ServerMessage } | { t: 'md'; ev: MarketEvent };
 
 const hx = (b: Uint8Array) => Buffer.from(b).toString('hex');
 const unhex = (h: string) => Uint8Array.from(Buffer.from(h, 'hex'));
@@ -92,11 +93,20 @@ export class WsRelayServer {
 
   private onConnection(ws: WsServerSocket): void {
     let conn: RelayConnection | null = null;
+    let unsubMd: (() => void) | null = null;
     ws.on('message', (data) => {
       let msg: ClientMsg;
       try {
         msg = JSON.parse(data.toString()) as ClientMsg;
       } catch {
+        return;
+      }
+      if (msg.t === 'subscribe') {
+        if (!unsubMd) {
+          unsubMd = this.relay.subscribeMarketData((ev) =>
+            ws.send(JSON.stringify({ t: 'md', ev } satisfies ServerEnvelope)),
+          );
+        }
         return;
       }
       if (msg.t === 'hello') {
@@ -109,7 +119,10 @@ export class WsRelayServer {
       if (msg.t === 'submit') conn.submit(decodeIntent(msg.intent), unhex(msg.sig));
       else if (msg.t === 'peer') conn.sendTo(msg.to, msg.payload);
     });
-    ws.on('close', () => conn?.close());
+    ws.on('close', () => {
+      conn?.close();
+      unsubMd?.();
+    });
   }
 
   close(): Promise<void> {

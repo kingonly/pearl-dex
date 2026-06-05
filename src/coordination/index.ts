@@ -52,6 +52,8 @@ export {
   type BookedOrder,
   type SubmitResult,
   type OrderBookConfig,
+  type BookLevel,
+  type BookSnapshot,
 } from './OrderBook.js';
 
 export {
@@ -82,6 +84,7 @@ export {
 } from './Relay.js';
 
 export { WsRelayServer, connectWsRelay } from './WsRelay.js';
+export type { MarketEvent } from './Relay.js';
 
 export {
   FileRegistry,

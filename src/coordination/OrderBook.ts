@@ -41,6 +41,19 @@ export interface Match {
   sellerPubHex: string;
 }
 
+/** One aggregated price level in the anonymized book view. */
+export interface BookLevel {
+  priceSatPerUnit: string;
+  baseSat: string;
+}
+
+/** Anonymized book for one pair: bids (buys) high→low, asks (sells) low→high. */
+export interface BookSnapshot {
+  pair: Pair;
+  bids: BookLevel[];
+  asks: BookLevel[];
+}
+
 export interface SubmitResult {
   accepted: boolean;
   reason?: string;
@@ -94,6 +107,28 @@ export class OrderBook {
   /** Resting orders for a side (unfilled), for inspection/tests. */
   resting(pair: Pair, side: Side): BookedOrder[] {
     return [...this.bookFor(pair)[side]];
+  }
+
+  /** Anonymized price-aggregated view of one pair's book (no pubkeys) — for the market-data feed. */
+  snapshot(pair: Pair): BookSnapshot {
+    const b = this.bookFor(pair);
+    const agg = (orders: BookedOrder[]): BookLevel[] => {
+      const byPrice = new Map<string, bigint>();
+      for (const o of orders) {
+        if (o.remainingSat <= 0n) continue;
+        const k = o.intent.limitPriceSatPerUnit.toString();
+        byPrice.set(k, (byPrice.get(k) ?? 0n) + o.remainingSat);
+      }
+      return [...byPrice].map(([priceSatPerUnit, base]) => ({ priceSatPerUnit, baseSat: base.toString() }));
+    };
+    const bids = agg(b.buy).sort((x, y) => cmp(BigInt(y.priceSatPerUnit), BigInt(x.priceSatPerUnit)));
+    const asks = agg(b.sell).sort((x, y) => cmp(BigInt(x.priceSatPerUnit), BigInt(y.priceSatPerUnit)));
+    return { pair, bids, asks };
+  }
+
+  /** Snapshots of every configured pair. */
+  snapshotAll(): BookSnapshot[] {
+    return this.cfg.pairs.map((p) => this.snapshot(p));
   }
 
   // ---- internals ----
