@@ -211,3 +211,60 @@ is **load-bearing for safety** and part of v1.
 
 Steps 1–4 are a working system on Pearl as-is. Step 5 is the part that beats anything vanilla-Bitcoin
 could do — isolated as an upgrade, not a dependency.
+
+---
+
+## 10. Monetization & third-party liquidity
+
+The operator earns a **fee on volume** without ever custodying funds, and never provides liquidity
+itself. Two mechanisms, designed to coexist.
+
+### 10.1 The operator fee (`src/settlement/Fee.ts`)
+
+A small fee (bps of trade size, with a floor) paid to the operator's address as part of
+settlement — the taker bears it. The operator is never in the money flow; the fee is just an
+output. Enforcement in tiers:
+
+- **v1 (soft):** the reference client includes the fee — either an extra output in the taker's
+  dest-leg claim, or a standalone fee tx (`buildFeeTx`, Komodo "dexfee" style) the taker broadcasts
+  as a precondition. The matching service only coordinates orders that commit the fee (`feeBps` is a
+  signed field of the `OrderIntent`, so it cannot be silently stripped — see §10.3). Defensibility is
+  liquidity concentration + UX, not protocol lock-in (an open venue is forkable).
+- **v2 (hard, Pearl-specific):** an `OP_CAT` covenant binds the dest-leg claim leaf to REQUIRE the
+  fee output — the leg is literally unspendable unless it pays the operator. Same covenant machinery
+  as the bond-payout enforcement (§5.5). Vanilla Bitcoin cannot do this; Pearl can. This is the
+  fee's real moat.
+
+The fee is carried as a committed term of the `SwapPlan` (`operatorFee`), so it travels with the
+swap layout both parties derive.
+
+### 10.2 Third-party liquidity providers (`LiquidityProvider`)
+
+Pure P2P has a cold-start / coincidence-of-wants problem: a taker needs a maker wanting the exact
+opposite right now. The fix that preserves "operator brings no capital": **let third parties run
+market-maker daemons.**
+
+- An LP holds its OWN BTC+PRL liquidity, quotes prices (CFMM or external feed, TDEX-style), and runs
+  the **maker side** of the swap. The reference LP daemon repackages **pearl-swap's orchestrator** —
+  the liquidity-provider model the operator won't run himself; others run it and bring the capital.
+- The operator routes taker requests to registered LPs (`quote()` → best quote wins → execute the
+  §5 swap) but never touches funds. The operator fee applies to LP-filled swaps too.
+- Result: takers always get filled (LP guarantees liquidity), the operator stays a non-custodial,
+  capital-free matchmaker, and the first organic flow (e.g. miners off-ramping PRL→BTC) has a
+  counterparty without the operator becoming one.
+
+### 10.3 Signed order intents (`src/coordination/types.ts`)
+
+Orders are **signed intents, never deposits**: `{makerPubkey, pair, side, amount, limitPrice,
+feeBps, expiry, nonce}` signed with the maker's BIP-340 key. The fee commitment is inside the
+signature, so a match can only be coordinated on fee-bearing terms. The operator stores/relays
+intents and matches crossings; it custodies nothing.
+
+### 10.4 Honest economics
+
+Revenue = take-rate × volume, and volume is gated by Pearl's success — this is a **leveraged bet on
+Pearl**, side-business-scale until/unless PRL has real volume. The early asset is *owning the default
+venue* (strategic/acquisition value, or a token later), not the fee stream. The pure-P2P design
+trades away easy monetization and liquidity UX for zero capital; §10.2 (third-party LPs) + owning the
+wallet/UX are the levers that make the fee actually materialize. See `docs/free-option-analysis.md`
+for why each *trade* is sound; the open risk is *volume*, not the mechanism.

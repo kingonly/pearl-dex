@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@noble/curves": "^2.2.0",
     "boltz-core": "^5.0.0",
     "ws": "^8.18.0"
   },

@@ -1,6 +1,7 @@
 import type { BTC_NETWORK } from '@scure/btc-signer/utils.js';
 import { buildSwapLeg, type SwapLeg } from './SwapTree.js';
 import { buildBond, type Bond } from './Bond.js';
+import type { TxOutputSpec } from './Funder.js';
 
 /**
  * The full on-chain layout of one peer-to-peer swap: both swap legs plus the taker's
@@ -43,6 +44,13 @@ export interface SwapPlanParams {
   bondNetwork: BTC_NETWORK;
   /** absolute height on the bond chain after which the maker can claim a forfeited bond. */
   bondForfeitHeight: number;
+  /**
+   * The operator fee committed for this swap (see Fee.ts). Carried as a committed term of the
+   * plan: in v1 the reference client pays it (an extra output in the taker's dest-leg claim, or
+   * a standalone fee tx) and the matching service only coordinates orders that include it; in v2
+   * an OP_CAT covenant binds the dest-leg claim to require this exact output (DESIGN.md §10).
+   */
+  operatorFee?: TxOutputSpec;
 }
 
 export interface SwapPlan {
@@ -52,6 +60,8 @@ export interface SwapPlan {
   destLeg: SwapLeg;
   /** option bond: taker posts; taker reclaims with preimage; maker forfeit-claims after timeout. */
   optionBond: Bond;
+  /** the operator fee output committed for this swap, if any (collected on the taker's claim). */
+  operatorFee?: TxOutputSpec;
 }
 
 /** Derive both swap legs and the taker's option bond. Pure: agrees on addresses given inputs. */
@@ -86,5 +96,5 @@ export function buildSwapPlan(p: SwapPlanParams): SwapPlan {
     musigOrder,
   });
 
-  return { sourceLeg, destLeg, optionBond };
+  return { sourceLeg, destLeg, optionBond, operatorFee: p.operatorFee };
 }
