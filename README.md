@@ -12,7 +12,7 @@ A **trustless, non-custodial, peer-to-peer exchange** between **Pearl (PRL)** an
 
 ## Status
 
-Every layer — from a signed order over a real WebSocket relay, through an LP that provides liquidity, to on-chain settlement — is built, tested, and **proven live on real pearld nodes** (51 unit/integration tests + a live on-chain swap test, typecheck clean).
+Every layer — from a signed order over a real WebSocket relay, through an LP that provides liquidity, to on-chain settlement — is built, tested, and **proven live** (51 unit/integration tests + live tests: a full on-chain swap across two pearld nodes, and a `BitcoinClient` read-path check against a real synced bitcoind signet; typecheck clean).
 
 > **Live milestone:** two `SwapClient`s posted crossing signed orders → the relay matched them → handshake over the relay → executors settled a real cross-chain atomic swap against two live pearld simnet nodes. Verified on-chain: dest claim (taker received PRL), source claim (maker learned the preimage *from the chain* and claimed), and bond reclaim — all confirmed, the secret genuinely crossing chains. See `test/live.simnet.test.ts` (skips unless both nodes are up).
 
