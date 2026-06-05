@@ -5,10 +5,12 @@
 // registry + direct peer connect, so the operator is never a settlement chokepoint (TDEX pattern).
 //
 // Implemented: the signed-intent + LP types (types.ts); the per-user P2P coordinator state machine
-// + persistent, fee-bumped, crash-safe watcher (SwapExecutor.ts + SwapStore.ts) that drives a
-// SwapPlan to completion for one party.
-// TODO (DESIGN.md §6-8): the intent matcher, the ws relay, and the flat-file registry (the
-// operator-side discovery/crossing service that feeds agreed terms into two parties' executors).
+// + persistent, fee-bumped, crash-safe watcher (SwapExecutor.ts + SwapStore.ts); and the operator-
+// side matching/relay layer — the crossing matcher (OrderBook.ts), the settlement handshake that
+// turns a match into agreed swap terms (Handshake.ts), the transport-abstracted relay (Relay.ts),
+// and the flat-file discovery registry (Registry.ts).
+// TODO: a real WebSocket adapter over RelayServer; a SwapClient that ties relay + handshake +
+// executor together; the third-party LP daemon (repackaged pearl-swap orchestrator).
 
 export {
   serializeIntent,
@@ -42,3 +44,40 @@ export {
   type AbortReason,
   type UtxoRecord,
 } from './SwapStore.js';
+
+export {
+  OrderBook,
+  COIN,
+  type Match,
+  type BookedOrder,
+  type SubmitResult,
+  type OrderBookConfig,
+} from './OrderBook.js';
+
+export {
+  deriveAmounts,
+  proposeTimeouts,
+  validateProposedTimeouts,
+  buildSwapParams,
+  type SwapNetworks,
+  type BondPolicy,
+  type SwapAmounts,
+  type Heights,
+  type ProposedTimeouts,
+  type HandshakeMessage,
+} from './Handshake.js';
+
+export {
+  RelayServer,
+  serializeMatch,
+  type RelayConnection,
+  type ServerMessage,
+  type SerializedMatch,
+} from './Relay.js';
+
+export {
+  FileRegistry,
+  type RegistryData,
+  type RelayEntry,
+  type LpEntry,
+} from './Registry.js';

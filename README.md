@@ -12,10 +12,10 @@ A **trustless, non-custodial, peer-to-peer exchange** between **Pearl (PRL)** an
 
 ## Status
 
-Settlement core + the free-option bond + the P2P coordinator are built and tested (23 tests, typecheck clean).
+Settlement core + the free-option bond + the P2P coordinator + the matching/relay layer are built and tested (38 tests, typecheck clean).
 
-- **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the new secret-tied `Bond`; the `SwapPlan` two-user layout; the operator `Fee` + signed `OrderIntent`s; and the **P2P coordinator** — a crash-safe, idempotent, fee-bumped (RBF) state machine (`SwapExecutor` + `SwapStore`) that drives one party's side of a swap to completion. E2E coverage runs two executors (taker + maker) concurrently against scripted in-memory chains with real transaction construction: happy path, taker walk → maker forfeit, counterparty-no-fund → taker refund + bond reclaim, mid-flight restart/resume, and an RBF fee bump.
-- **Next:** the matching/relay server (intent crossing + ws relay + flat-file registry — the operator-side service that feeds agreed terms into two parties' executors, and makes the soft fee real via the LP registry), the maker commitment bond (closes the documented forfeit-griefing gap), then live simnet/signet E2E. The `OP_CAT` covenant is demoted to an optional later PoC, not a dependency. See `DESIGN.md` §9.
+- **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the secret-tied `Bond`; the `SwapPlan` two-user layout; the operator `Fee` + signed `OrderIntent`s; the **P2P coordinator** — a crash-safe, idempotent, fee-bumped (RBF) state machine (`SwapExecutor` + `SwapStore`); and the **matching/relay layer** — the crossing matcher (`OrderBook`, price-time priority, partial fills, fee/expiry/signature gates), the settlement handshake that turns a match into agreed swap terms (`Handshake`), the transport-abstracted relay (`RelayServer`), and the flat-file discovery registry (`FileRegistry`). A relay E2E drives the **whole pipe** — two parties post crossing signed intents → the relay matches them → they run the handshake *through* the relay → both derive byte-identical swap terms → their `SwapExecutor`s settle the atomic swap end-to-end — alongside coordinator E2Es (happy path, taker walk → maker forfeit, counterparty-no-fund → refund + bond reclaim, restart/resume, RBF bump).
+- **Next:** a real WebSocket adapter over `RelayServer`; a `SwapClient` that ties relay + handshake + executor together; the third-party LP daemon (repackaged pearl-swap orchestrator); the maker commitment bond (closes the documented forfeit-griefing gap); then real `ChainClient`/`SwapWallet` impls + live simnet/signet E2E. The `OP_CAT` covenant remains an optional later PoC, not a dependency. See `DESIGN.md` §9.
 
 **Read [`DESIGN.md`](./DESIGN.md) for the protocol** and [`MATURITY.md`](./MATURITY.md) for an honest, layer-by-layer assessment of what is battle-tested vs. novel vs. experimental.
 
@@ -23,7 +23,7 @@ Settlement core + the free-option bond + the P2P coordinator are built and teste
 
 | Layer | Responsibility | Custody |
 |---|---|---|
-| `src/coordination` | Signed-intent types, the per-user swap coordinator (`SwapExecutor` + `SwapStore`); matching, message relay & registry to come | none |
+| `src/coordination` | Signed intents, the crossing matcher (`OrderBook`), settlement handshake, relay (`RelayServer`), discovery registry, and the per-user swap coordinator (`SwapExecutor` + `SwapStore`) | none |
 | `src/settlement` | Cross-chain atomic swap + bonds (ported/refactored from pearl-swap) | none — funds locked in user-controlled HTLCs |
 | `src/client` | Per-user wallet that custodies keys and executes its leg | self-custody |
 | `src/common` | Shared types, Pearl/BTC network params, tapscript helpers | — |
