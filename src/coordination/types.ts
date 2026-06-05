@@ -1,5 +1,6 @@
 import { schnorr } from '@noble/curves/secp256k1.js';
 import { sha256 } from '@scure/btc-signer/utils.js';
+import type { Signer } from '../signer/index.js';
 
 /**
  * Coordination-layer types: signed order INTENTS (the non-custodial matching primitive) and
@@ -66,6 +67,14 @@ export function intentDigest(o: OrderIntent): Uint8Array {
 /** Sign an order intent with the maker's identity private key (BIP-340 schnorr). */
 export function signIntent(o: OrderIntent, makerPrivkey: Uint8Array): Uint8Array {
   return schnorr.sign(intentDigest(o), makerPrivkey);
+}
+
+/**
+ * Sign an order intent via the signing seam (a held key, a Privy embedded wallet, hardware…). The
+ * intent's `makerPubkey` must be the signer's x-only key. Returns the schnorr signature.
+ */
+export async function signIntentWith(o: OrderIntent, signer: Signer): Promise<Uint8Array> {
+  return signer.signSchnorr(intentDigest(o));
 }
 
 /** Verify an order intent's signature against its committed maker pubkey. */

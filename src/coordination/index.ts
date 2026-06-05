@@ -16,6 +16,7 @@ export {
   serializeIntent,
   intentDigest,
   signIntent,
+  signIntentWith,
   verifyIntent,
   type Pair,
   type Side,
