@@ -88,7 +88,7 @@ export interface SwapExecutorDeps {
   wallet: SwapWallet;
   /**
    * This party's swap signer — authority over its claim/refund/bond spends, through the Signer
-   * seam (a held key, or a remote/Privy signer). Its pubkey must match this role's key in the
+   * seam (a held key — incl. an in-browser ephemeral swap key — or a remote/hardware signer). Its pubkey must match this role's key in the
    * params. It is NOT custody: funds always pay out to the wallet's payoutScript, never to the signer.
    */
   swapSigner: Signer;

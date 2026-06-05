@@ -70,7 +70,7 @@ export interface SwapClientDeps {
   identityPrivateKey: Uint8Array;
   /**
    * swap signer — authority over this user's swap legs / bond, through the Signer seam (a held key
-   * via LocalSigner, or a remote/Privy signer that only signs hashes). Never custodies funds: legs
+   * via LocalSigner — incl. an in-browser ephemeral key — or a remote/hardware signer). Never custodies funds: legs
    * always pay out to `wallet.payoutScript`. This is what lets a browser user sign without the app
    * holding their key.
    */

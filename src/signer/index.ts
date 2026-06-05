@@ -6,11 +6,15 @@ import { pubECDSA, pubSchnorr } from '@scure/btc-signer/utils.js';
  * taproot script-path spends that claim/refund/reclaim a swap — depends only on this interface, not
  * on holding raw key bytes. That lets the same code run against:
  *
- *   - LocalSigner          — a key we hold (the LP daemon; advanced self-custody; tests).
- *   - PrivySigner (later)  — a Privy embedded wallet that NEVER exposes the key and only signs a
- *                            hash on request. This is why the interface is "sign a hash", not
- *                            "give me the private key": it's the lowest common denominator that both
- *                            a local key and a managed signer (Privy, hardware) can satisfy.
+ *   - LocalSigner          — a key we hold. This covers BOTH the LP daemon / tests AND the browser
+ *                            client, where the swap's claim/refund key is an EPHEMERAL key generated
+ *                            client-side per swap (claim/refund authority only — not custody, not a
+ *                            wallet; funds pay out to the user's own address). pearl-dex provides no
+ *                            wallet; the swap key isn't the user's funding-wallet key anyway (consumer
+ *                            wallets can't sign an HTLC script-path), so a per-swap ephemeral key is
+ *                            the natural authority.
+ *   - a remote/hardware signer — anything that only signs a 32-byte hash on request can slot in too.
+ *                            This is why the interface is "sign a hash", not "give me the private key".
  *
  * BIP-340 Schnorr over a 32-byte message covers both needs: order intents are signed that way, and
  * taproot script-path leaves are `<pubkey> OP_CHECKSIG` (Schnorr over the taproot sighash). The

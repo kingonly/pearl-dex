@@ -101,7 +101,7 @@ Four layers, strict separation, **custody only ever at the edges (the users)**:
 | `src/coordination` | Signed intents, the crossing matcher (`OrderBook`), settlement handshake, relay (`RelayServer`/`WsRelay`), discovery (`Registry`), anti-grief (`MakerReputation`) | **none** |
 | `src/settlement` | Cross-chain atomic swap legs + secret-tied bond, timelock math, chain clients | none — funds sit in user-controlled HTLCs |
 | `src/client` | `SwapClient` — the object a user runs: posts intents, runs the handshake, drives its `SwapExecutor`; plus `Signer` and `SwapWallet` | self-custody (user only) |
-| `src/signer` | The signing seam: `Signer` interface + `LocalSigner` (held key; a Privy/remote signer slots in here) | key authority, **not** fund custody |
+| `src/signer` | The signing seam: `Signer` interface + `LocalSigner` (held key — incl. an in-browser ephemeral swap key; a remote/hardware signer also fits) | key authority, **not** fund custody |
 | `src/common` | Shared types, Pearl/BTC network params, tapscript helpers | — |
 
 ---
@@ -157,21 +157,25 @@ The bond timelocks sit in a strict ladder so a walk is penalizable but principal
 
 ---
 
-## Custody & signing — why there's no wallet to trust
+## Custody & signing — pearl-dex provides no wallet
 
-pearl-dex is a DEX, not a wallet. Two design choices keep it that way:
+pearl-dex is a DEX, **not a wallet** — it never provides, holds, or recovers a user's wallet. Two
+design choices keep it that way:
 
 **1. Funding is watch-for-deposit, not spend-your-balance.** A user funds a swap by sending to the
 lockup address **from their own wallet**; the app (`WatchDepositWallet`) just shows "send X here" and
 watches the chain for it. On the BTC leg that's the Bitcoin wallet you already have; on the PRL leg
-it's your Pearl/Privy wallet. The app never touches your balance. (`ReferenceWallet`, which *does*
-spend its own UTXOs, exists for the unattended **LP daemon** — not for end users.)
+it's the user's own Pearl wallet (a Pearl-ecosystem dependency — we integrate one, never ship one).
+The app never touches your balance. (`ReferenceWallet`, which *does* spend its own UTXOs, exists for
+the unattended **LP daemon** — not for end users.)
 
-**2. Signing goes through a seam, not a stored key.** Claim/refund/bond signatures are produced by a
-`Signer` that only signs a 32-byte hash — satisfied by a `LocalSigner` (held key, for the LP/tests)
-or by a remote/embedded signer like Privy in a browser. The signer is **claim/refund authority only**;
-funds always pay out to the user's own address. So a browser user can trade without the app ever
-holding their key.
+**2. The swap claim/refund key is an ephemeral, in-browser signer — not a wallet, not custody.** A
+swap's claim/refund/bond spends are taproot script-path spends of the HTLC, which a normal wallet
+can't sign — they need a *swap-specific* key, separate from the funding wallet. That key is generated
+**client-side, per swap**, behind the `Signer` seam (`LocalSigner` runs in the browser; persisted to
+IndexedDB so a refresh resumes). It is **claim/refund authority only** — funds always pay out to the
+user's own address, and it's discarded after the swap. No seed phrase, no extension, and nothing the
+app custodies. (A hardware or remote signer can slot into the same seam, but we provide no wallet.)
 
 ```
   user's own wallet ──send──▶  swap lockup (taproot HTLC)  ──claim──▶  user's own address
@@ -229,7 +233,7 @@ to on-chain settlement — is built, tested, and **proven live**.
   pearld btcd-RPC, `BitcoinClient` over bitcoind Core-RPC, sharing an incremental block-scanning
   `RpcChainClient`).
 - **Signing seam** (`src/signer`) — all claim/refund/bond signing routed through a `Signer` that only
-  signs a hash; `LocalSigner` today, Privy/remote-ready for the browser.
+  signs a hash; `LocalSigner` today, including an in-browser ephemeral swap key for the browser client.
 - **Coordinator** — a crash-safe, idempotent, **deadline-driven & confirmation-gated**, fee-bumped
   (RBF) state machine (`SwapExecutor` + `SwapStore`).
 - **Matching/relay** — crossing matcher (`OrderBook`: price-time priority, partial fills,
@@ -244,7 +248,7 @@ to on-chain settlement — is built, tested, and **proven live**.
   `SpreadPolicy`) that keeps fresh resting quotes so a lone taker always fills (the cold-start fix).
 
 **Next:** a patient real BTC↔PRL signet run end-to-end; σ·√T-aware bond sizing; the browser client
-(Privy signer + watch-for-deposit); the venue/UX frontend (the real moat). The `OP_CAT` covenant
+(in-browser ephemeral signer + watch-for-deposit); the venue/UX frontend (the real moat). The `OP_CAT` covenant
 remains an optional later PoC, not a dependency. See `DESIGN.md` §9.
 
 ---

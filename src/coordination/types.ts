@@ -70,7 +70,8 @@ export function signIntent(o: OrderIntent, makerPrivkey: Uint8Array): Uint8Array
 }
 
 /**
- * Sign an order intent via the signing seam (a held key, a Privy embedded wallet, hardware…). The
+ * Sign an order intent via the signing seam (a held key — incl. an in-browser ephemeral key — or a
+ * remote/hardware signer). The
  * intent's `makerPubkey` must be the signer's x-only key. Returns the schnorr signature.
  */
 export async function signIntentWith(o: OrderIntent, signer: Signer): Promise<Uint8Array> {

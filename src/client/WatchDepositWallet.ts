@@ -13,7 +13,8 @@ import type { UtxoRef } from '../settlement/ChainClient.js';
  * "send to this address" model). It holds no key and spends nothing.
  *
  *   - BTC leg: the user sends from whatever Bitcoin wallet they already have.
- *   - PRL leg: the user sends from their Pearl / Privy wallet (Pearl has no other wallet yet).
+ *   - PRL leg: the user sends from their own Pearl wallet (a Pearl-ecosystem dependency — pearl-dex
+ *     integrates one, it never ships or custodies a wallet).
  *
  * Claims/refunds are signed through the executor's `Signer` (claim/refund authority only, never
  * custody) and pay out to `payoutScript` — the user's OWN receiving address per network, which they
@@ -41,7 +42,7 @@ export interface WatchDepositWalletDeps {
   payoutScripts: PayoutScript[];
   /**
    * Called when the swap needs the user to fund a lockup. The UI shows "send <amount> to <address>"
-   * (and on the PRL leg drives the user's Pearl/Privy wallet to send). The wallet then watches the
+   * (and on the PRL leg drives the user's own Pearl wallet to send). The wallet then watches the
    * chain for the deposit. Omit it only in tests or when funding is injected out-of-band.
    */
   onDepositRequest?: (req: DepositRequest) => void;

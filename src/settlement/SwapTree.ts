@@ -115,7 +115,7 @@ export interface LockupUtxo {
  * Build and sign a single-input taproot SCRIPT-PATH spend of a swap leg, THROUGH the Signer seam.
  *
  * We no longer hand a private key to boltz-core's `constructClaimTransaction`. Instead we assemble
- * the tx ourselves and obtain the one signature from a `Signer` (a held key, or a remote/Privy
+ * the tx ourselves and obtain the one signature from a `Signer` (a held key, or a remote/hardware
  * signer that only signs a 32-byte hash). This is what lets a browser user sign claims without the
  * app ever holding the key. The witness is the same boltz produces: `[sig, preimage?, leaf, control]`.
  *

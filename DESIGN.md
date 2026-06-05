@@ -77,7 +77,8 @@ tapscript leaves. (pearl-swap already does this — port it.)
    chokepoint or in the settlement critical path.
 2. **Settlement layer.** The cross-chain atomic swap + bonds. This is `pearl-swap`'s proven
    taproot swap engine, refactored from **LP-counterparty** to **coordinator-of-two-user-wallets**.
-3. **Client.** Each side runs a wallet that custodies its own keys and drives its leg of the swap.
+3. **Client.** Each side uses its OWN wallet for funds (watch-for-deposit; pearl-dex ships no wallet)
+   and an ephemeral, client-side swap signer (claim/refund authority only) to drive its leg.
 
 ---
 
@@ -254,7 +255,8 @@ is **load-bearing for safety** and part of v1.
 2. **Taker option bond** (§5.3) — pure hashlock+CLTV leaves, no covenant. Neutralizes the free option.
 3. **Matching + relay server** (§6) — signed intents, crossing, relay; flat-file registry. This is
    also the frontend that collects the fee (baked into the dest claim the client builds — §10.1).
-4. **Client** for both sides (self-custody wallet + swap executor).
+4. **Client** for both sides (the user's own wallet for funding + an ephemeral swap signer + the
+   executor). pearl-dex provides no wallet.
 5. **Relay reputation** (§5.4) — mitigate maker grief by de-prioritizing makers that fail to fund
    after matching (a symmetric commitment bond is unsound — see docs/maker-grief-analysis.md).
 6. **(Optional, later) `OP_CAT` PoC** — a credibility/demo spike, NOT a roadmap gate. Revisit only
