@@ -9,3 +9,7 @@ backends/*
 *-key.json
 *.key
 .DS_Store
+
+# screenshot / browser-tool artifacts
+.playwright-mcp/
+pearl-dex-*.png
