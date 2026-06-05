@@ -1,2 +1,9 @@
-export { pearlSimnet, pearlTestnet, bitcoinSignet } from './networks.js';
+export {
+  pearlSimnet,
+  pearlTestnet,
+  bitcoinSignet,
+  networkForTag,
+  tagForNetwork,
+  type NetworkTag,
+} from './networks.js';
 export { p2trAddress, p2trScript, addressToScript, decodeAddress } from './address.js';

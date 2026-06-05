@@ -35,3 +35,33 @@ export const pearlTestnet: BTC_NETWORK = {
  * (the timelock-safety math depends on it). Addresses: `tb1p...`.
  */
 export const bitcoinSignet: BTC_NETWORK = TEST_NETWORK;
+
+/**
+ * Stable string tag for each network. The coordinator persists swap records to disk so it can
+ * resume after a restart; a `BTC_NETWORK` is a params object (not serializable to a stable id),
+ * so records store the TAG and re-resolve the object via `networkForTag`. Tags are matched on
+ * the bech32 HRP, which is unique per network.
+ */
+export type NetworkTag = 'pearlSimnet' | 'pearlTestnet' | 'bitcoinSignet';
+
+const NETWORKS: Record<NetworkTag, BTC_NETWORK> = {
+  pearlSimnet,
+  pearlTestnet,
+  bitcoinSignet,
+};
+
+/** Resolve a persisted tag back to its network params. */
+export function networkForTag(tag: NetworkTag): BTC_NETWORK {
+  const net = NETWORKS[tag];
+  if (!net) throw new Error(`unknown network tag: ${tag}`);
+  return net;
+}
+
+/** The stable tag for a network (by bech32 HRP). Throws if the network is unrecognized. */
+export function tagForNetwork(net: BTC_NETWORK): NetworkTag {
+  const tag = (Object.keys(NETWORKS) as NetworkTag[]).find(
+    (t) => NETWORKS[t].bech32 === net.bech32,
+  );
+  if (!tag) throw new Error(`unrecognized network (bech32=${net.bech32})`);
+  return tag;
+}

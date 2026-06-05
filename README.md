@@ -11,10 +11,10 @@ A **trustless, non-custodial, peer-to-peer exchange** between **Pearl (PRL)** an
 
 ## Status
 
-Settlement core + the free-option bond are built and tested (10 tests, typecheck clean).
+Settlement core + the free-option bond + the P2P coordinator are built and tested (23 tests, typecheck clean).
 
-- **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the new secret-tied `Bond`; the `SwapPlan` two-user layout; a full two-user BTC→PRL E2E (happy + walk/forfeit paths) against scripted in-memory chains with real transaction construction.
-- **Next:** P2P coordinator state machine + persistent fee-bumped watcher (`src/coordination`), the maker commitment bond, live simnet/signet E2E, then the matching/relay server. See `DESIGN.md` §9.
+- **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the new secret-tied `Bond`; the `SwapPlan` two-user layout; the operator `Fee` + signed `OrderIntent`s; and the **P2P coordinator** — a crash-safe, idempotent, fee-bumped (RBF) state machine (`SwapExecutor` + `SwapStore`) that drives one party's side of a swap to completion. E2E coverage runs two executors (taker + maker) concurrently against scripted in-memory chains with real transaction construction: happy path, taker walk → maker forfeit, counterparty-no-fund → taker refund + bond reclaim, mid-flight restart/resume, and an RBF fee bump.
+- **Next:** the matching/relay server (intent crossing + ws relay + flat-file registry — the operator-side service that feeds agreed terms into two parties' executors), the maker commitment bond (closes the documented forfeit-griefing gap), live simnet/signet E2E, then the OP_CAT covenant spike. See `DESIGN.md` §9.
 
 **Read [`DESIGN.md`](./DESIGN.md) for the protocol** and [`MATURITY.md`](./MATURITY.md) for an honest, layer-by-layer assessment of what is battle-tested vs. novel vs. experimental.
 
@@ -22,7 +22,7 @@ Settlement core + the free-option bond are built and tested (10 tests, typecheck
 
 | Layer | Responsibility | Custody |
 |---|---|---|
-| `src/coordination` | Order intake (signed intents), matching, message relay, flat-file registry | none |
+| `src/coordination` | Signed-intent types, the per-user swap coordinator (`SwapExecutor` + `SwapStore`); matching, message relay & registry to come | none |
 | `src/settlement` | Cross-chain atomic swap + bonds (ported/refactored from pearl-swap) | none — funds locked in user-controlled HTLCs |
 | `src/client` | Per-user wallet that custodies keys and executes its leg | self-custody |
 | `src/common` | Shared types, Pearl/BTC network params, tapscript helpers | — |

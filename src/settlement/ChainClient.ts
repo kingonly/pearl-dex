@@ -61,6 +61,19 @@ export interface ChainClient {
   broadcast(txHex: string): Promise<string>;
 
   /**
+   * Single-shot: return the lockup funding `address` with at least `minConfs` confirmations,
+   * or null if none is visible yet. The coordinator uses this to race a counterparty's lockup
+   * against a block-height deadline (the blocking `watchForLockup` can only race wall-clock time).
+   */
+  getLockup(address: string, minConfs: number): Promise<LockupFunding | null>;
+
+  /**
+   * Single-shot: return the spend of `utxo` if it has been spent, else null. Lets the
+   * coordinator poll for a counterparty claim while also checking the timeout height.
+   */
+  getSpend(utxo: UtxoRef): Promise<SpendDetection | null>;
+
+  /**
    * Resolve once a lockup funding the given address is seen with at least `minConfs`
    * confirmations. Used to detect a counterparty's lockup or bond before acting.
    */
