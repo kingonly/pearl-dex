@@ -14,3 +14,9 @@ export {
   type SwapClientDeps,
   type SwapHandle,
 } from './SwapClient.js';
+
+export {
+  ReferenceWallet,
+  type ReferenceWalletDeps,
+  type WalletUtxo,
+} from './ReferenceWallet.js';

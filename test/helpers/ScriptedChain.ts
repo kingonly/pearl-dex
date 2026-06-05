@@ -1,4 +1,4 @@
-import { Transaction } from '@scure/btc-signer';
+import { Address, OutScript, Transaction } from '@scure/btc-signer';
 import type { BTC_NETWORK } from '@scure/btc-signer/utils.js';
 import type {
   ChainClient,
@@ -90,6 +90,19 @@ export class ScriptedChainClient implements ChainClient {
       const ref: UtxoRef = { txid: hexFrom(input.txid), vout: input.index ?? 0 };
       this.spends.set(key(ref), { spendTxid: txid, spendTxHex: txHex, inputIndex: i });
     }
+    // Auto-register: index every output by its address so getLockup() finds wallet-funded lockups
+    // (a real chain makes broadcast outputs queryable). p2tr/known outputs only; others skipped.
+    for (let i = 0; i < tx.outputsLength; i++) {
+      const out = tx.getOutput(i);
+      if (!out?.script || out.amount === undefined) continue;
+      const addr = addressFromScript(out.script, this.network);
+      if (!addr) continue;
+      this.lockups.set(addr, {
+        utxo: { txid, vout: i },
+        amountSat: Number(out.amount),
+        scriptPubKey: Buffer.from(out.script),
+      });
+    }
     return txid;
   }
   async stop(): Promise<void> {
@@ -134,3 +147,14 @@ export class ScriptedChainClient implements ChainClient {
 
 const key = (u: UtxoRef) => `${u.txid}:${u.vout}`;
 const hexFrom = (b: Uint8Array) => Buffer.from(b).toString('hex');
+
+/** Best-effort address for an output script (p2tr and other standard types); null if undecodable. */
+function addressFromScript(script: Uint8Array, network: BTC_NETWORK): string | null {
+  try {
+    // OutScript.decode's return type isn't structurally identical to Address.encode's param in
+    // @scure's types (ArrayBuffer vs SharedArrayBuffer variance); the value is valid at runtime.
+    return Address(network).encode(OutScript.decode(script) as Parameters<ReturnType<typeof Address>['encode']>[0]) || null;
+  } catch {
+    return null;
+  }
+}
