@@ -3,7 +3,9 @@
 "Is this battle-tested?" — the answer differs sharply by layer. This document exists so we never
 fool ourselves (or anyone we pitch) about what is proven vs. novel vs. experimental.
 
-Summary: **~70% inheriting proven work, ~30% new composition, plus one frontier bet we can defer.**
+Summary: **~70% inheriting proven work, ~30% new composition.** (An `OP_CAT` covenant was once a
+fourth, frontier layer; as of 2026-06-05 it is **dropped from the plan** — neither needed for safety
+nor the real moat. See Layer 3 below and DESIGN.md §5.5.)
 This is **not** a turnkey existing protocol you redeploy. The closest existing system is
 **BasicSwap** (Particl, MIT) — we fork its *ideas* and re-express them for taproot-only Pearl, then
 add the bond economics.
@@ -29,14 +31,18 @@ add the bond economics.
 - Risk: medium. Needs adversarial testing and ideally an external security review. Cannot be pointed
   to as "X has run this for years."
 
-## Layer 3 — `OP_CAT` covenant-enforced bond payout: FRONTIER / EXPERIMENTAL
+## Layer 3 — `OP_CAT` covenant: DROPPED FROM THE PLAN (optional future PoC only)
 
-- `OP_CAT` covenants have been demonstrated in research and on testnets, but `OP_CAT` is **not live
-  on Bitcoin mainnet**, and **no production system at scale** settles real value through pure-`OP_CAT`
-  sighash-reconstruction covenants.
-- On Pearl this is genuinely novel territory.
-- Risk: high — **so it is deliberately optional and behind a research spike.** The venue stands on
-  Layers 1–2 even if this never ships.
+- **Not needed for the bond.** The secret-tied bond is self-enforcing — whoever spends the forfeit
+  leaf is its beneficiary, so there is nothing for a covenant to enforce (DESIGN.md §5.5).
+- **Not the fee's moat.** A covenant could hard-bind the fee output, but the realistic LP-registry
+  model already enforces the fee operationally; the covenant only bites in LP-less user-to-user
+  swaps. Defensibility is liquidity + UX + default-venue, not script lock-in.
+- **Highest risk in the project.** `OP_CAT` covenants are demonstrated in research/testnets but **not
+  live on Bitcoin mainnet** and run **no production value at scale** via pure-sighash-reconstruction;
+  on Pearl's exact engine it's untrodden. Not worth gating anything on.
+- **Kept only as a possible later demo** — "what Pearl can do that Bitcoin can't," a credibility
+  artifact for the Pearl relationship, never a dependency. The venue stands fully on Layers 1–2.
 
 ---
 
@@ -44,9 +50,10 @@ add the bond economics.
 
 - Lean hard on proven primitives and existing implementations (BasicSwap, pearl-swap) for the
   **trust-critical paths**.
-- Keep the **novel parts isolated and heavily tested**: bonds (Layer 2) and covenant (Layer 3) live
-  behind clear module boundaries with their own adversarial test suites.
-- The covenant is an upgrade, never a dependency. If the prototype spike fails, v1 is unaffected.
+- Keep the **novel parts isolated and heavily tested**: the bonds (Layer 2) live behind clear module
+  boundaries with their own adversarial test suites.
+- No covenant in the plan — the venue is plain taproot. If an `OP_CAT` PoC is ever built, it stays an
+  isolated demo, never a dependency.
 - Before mainnet value flows: external security review of the bond logic; conservative bonds/timelocks
   at launch (highest volatility, weakest chain security) tightened as both normalize.
 

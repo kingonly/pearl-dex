@@ -57,6 +57,9 @@ one 520-byte element). But without CSFS or wide arithmetic, covenants are limite
 **equality / concatenation / field-pinning** constraints — enough to bind an output's amount and
 destination, not enough for in-script proportional math.
 
+> The venue does **not** use any of this. Covenants are an optional, deferred PoC (§5.5); v1 and the
+> business case stand on plain taproot. This section documents the capability, not a dependency.
+
 Pearl is **taproot-only** (no legacy/segwit-v0). Every lock/refund/HTLC is expressed as P2TR with
 tapscript leaves. (pearl-swap already does this — port it.)
 
@@ -137,21 +140,30 @@ optionality. (This is Komodo's "both deposit" structure, tied to the swap secret
 > collapsing the *effective* option window toward one-chain confirmation time. We get the cheap
 > corner of the option-cost table by economics, not by weakening safety.
 
-### 5.5 `OP_CAT` enhancement (optional, research-gated — see MATURITY.md §3)
+### 5.5 `OP_CAT` enhancement (NOT a dependency — optional future PoC, see MATURITY.md §3)
 
-`OP_CAT` upgrades the bond from convention-enforced to **consensus-enforced**:
+> **Demoted (2026-06-05).** Originally framed as *the* differentiator; on review it is neither
+> needed for safety nor the real moat, so it is off the critical path. v1 — and the venue as a
+> whole — is plain taproot. Keep this section as a record of the idea and a possible later spike.
 
-1. **Bond-payout binding.** Via on-stack BIP-341 sigmsg reconstruction, the forfeit leaf can require
-   that the spending tx pays *exactly* the bond amount to *exactly* the maker's address — removing
-   fee-management fragility and edge cases. Field-pinning the outputs hash fits within 520 bytes for
-   simple 1–2-output spends.
-2. **Atomic claim-or-forfeit.** Bind swap-claim and bond-resolution into one enforced tx shape so no
-   one can claim the swap leg while griefing the bond leg.
+What `OP_CAT` *could* add, and why each turns out to be weak:
 
-**Boundary:** covenants here are equality/structure constraints only — `OP_MUL`/`OP_MOD` are
-disabled, so no in-script proportional/fee math. Feasibility of the pure-`OP_CAT` construction on
-Pearl's exact engine (cost budget, 32-bit `OP_ADD`) is the one genuine unknown → prototype spike
-before depending on it. **v1 ships on §5.3–5.4 with no covenant.**
+1. **Bond-payout binding** — make the forfeit leaf require the spend pay exactly the bond amount to
+   the maker, via on-stack BIP-341 sigmsg reconstruction. **Redundant:** the secret-tied bond is
+   already self-enforcing. Whoever spends the forfeit leaf *is* the beneficiary (the maker), signing
+   for it themselves — there is no third party to cheat, so there is nothing for a covenant to
+   enforce. A covenant only matters when the spend must pay someone *other* than the spender.
+2. **Hard-bound operator fee** — make the dest-leg claim unspendable unless it pays the fee output
+   (see §10.1). This is the *only* unique thing `OP_CAT` buys, and even it is largely covered by the
+   realistic liquidity model: an LP simply won't fund the dest leg without a committed fee (§10.1).
+   The covenant's unique value is confined to true user-to-user swaps with no LP in the middle.
+
+**Why not depend on it:** it is the single most speculative piece in the project — `OP_CAT`
+covenants are not battle-tested at scale anywhere, and ours would be a pure-sigmsg-reconstruction
+covenant against Pearl's quirky engine (520-byte cap, 32-bit `OP_ADD`, no `OP_MUL`/`OP_MOD`, no
+introspection). The one legitimate reason to build it later is **narrative/credibility** ("look what
+Pearl can do that Bitcoin can't") — a marketing/demo artifact for the Pearl relationship, not a
+product gate. **v1 ships on §5.3–5.4 with no covenant.**
 
 ---
 
@@ -204,13 +216,15 @@ is **load-bearing for safety** and part of v1.
    two-user on-chain HTLC swap end-to-end (the swap itself is already proven cross-chain).
 2. **Bilateral secret-tied bonds** (§5.3–5.4) — pure hashlock+CLTV leaves, no covenant. Makes the
    venue economically sound.
-3. **Matching + relay server** (§6) — signed intents, crossing, relay; flat-file registry.
+3. **Matching + relay server** (§6) — signed intents, crossing, relay; flat-file registry. This is
+   also what makes the soft fee real (the operator/LP registry enforces it operationally — §10.1).
 4. **Client** for both sides (self-custody wallet + swap executor).
-5. **Research spike (parallel):** prototype the `OP_CAT` bond-payout covenant against Pearl's actual
-   tapscript engine. If it lands → differentiator. If not → v1 stands on steps 1–4.
+5. **Maker commitment bond** (§5.4) — closes the documented forfeit-griefing gap (symmetric bond).
+6. **(Optional, later) `OP_CAT` PoC** — a credibility/demo spike, NOT a roadmap gate. Revisit only
+   if there is real volume to defend *and* evidence the soft fee actually leaks. See §5.5.
 
-Steps 1–4 are a working system on Pearl as-is. Step 5 is the part that beats anything vanilla-Bitcoin
-could do — isolated as an upgrade, not a dependency.
+Steps 1–4 are a working system on Pearl as-is; step 5 hardens it. Step 6 is explicitly optional —
+the venue is plain taproot and does not wait on any covenant work.
 
 ---
 
@@ -225,15 +239,18 @@ A small fee (bps of trade size, with a floor) paid to the operator's address as 
 settlement — the taker bears it. The operator is never in the money flow; the fee is just an
 output. Enforcement in tiers:
 
-- **v1 (soft):** the reference client includes the fee — either an extra output in the taker's
-  dest-leg claim, or a standalone fee tx (`buildFeeTx`, Komodo "dexfee" style) the taker broadcasts
-  as a precondition. The matching service only coordinates orders that commit the fee (`feeBps` is a
-  signed field of the `OrderIntent`, so it cannot be silently stripped — see §10.3). Defensibility is
-  liquidity concentration + UX, not protocol lock-in (an open venue is forkable).
-- **v2 (hard, Pearl-specific):** an `OP_CAT` covenant binds the dest-leg claim leaf to REQUIRE the
-  fee output — the leg is literally unspendable unless it pays the operator. Same covenant machinery
-  as the bond-payout enforcement (§5.5). Vanilla Bitcoin cannot do this; Pearl can. This is the
-  fee's real moat.
+- **v1 — soft, and the actual plan:** the fee is enforced *operationally*, not in script. `feeBps` is
+  a signed field of the `OrderIntent` so it can't be silently stripped (§10.3); the reference client
+  includes the fee (an extra output in the dest-leg claim, or a standalone `buildFeeTx` Komodo
+  "dexfee" tx); and — the load-bearing part — **the LP/maker won't fund the dest leg without a
+  committed fee** (§10.2). Since liquidity comes from registered LP daemons, the operator's fee is a
+  relationship with the LP, not something a taker can route around. Defensibility is liquidity
+  concentration + UX + being the default venue, not protocol lock-in (an open venue is forkable
+  regardless of chain).
+- **v2 — hard, OP_CAT, NOT planned (see §5.5):** a covenant *could* make the dest-leg claim
+  unspendable unless it pays the fee. This is the only thing a covenant uniquely adds, and it only
+  bites in true user-to-user swaps with no LP enforcing the fee. Given the speculative cost of
+  `OP_CAT` covenants, this is parked as an optional future PoC, not the fee's moat.
 
 The fee is carried as a committed term of the `SwapPlan` (`operatorFee`), so it travels with the
 swap layout both parties derive.

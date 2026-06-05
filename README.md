@@ -5,7 +5,8 @@ A **trustless, non-custodial, peer-to-peer exchange** between **Pearl (PRL)** an
 - **Users are both sides of the market.** Makers and takers bring the liquidity; the operator never holds funds, never quotes prices, never provides liquidity.
 - **Off-chain matching, on-chain settlement.** Orders are signed *intents*, not deposits. Settlement is a trustless on-chain atomic swap — neither party can steal, principal is protected by hashlock + timelock.
 - **Forfeitable bonds** tied to the swap secret neutralize the *free-option problem* that has historically killed atomic-swap DEXs.
-- **Leverages Pearl's `OP_CAT`** (enabled in tapscript — Bitcoin mainnet lacks it) to enforce bond payouts in consensus. This layer is optional and research-gated; the venue stands without it.
+
+> Pearl uniquely enables `OP_CAT` in tapscript (Bitcoin mainnet doesn't), which *could* hard-bind the operator fee in consensus. On review this is **not a dependency and not the moat** — the venue is plain taproot; the fee is enforced operationally via the LP registry; defensibility is liquidity + UX + being the default venue. An `OP_CAT` covenant is parked as an optional future demo, not a roadmap item. See `DESIGN.md` §5.5.
 
 > Sibling to [`pearl-swap`](https://github.com/kingonly/pearl-swap) (the liquidity-provider swap engine) and [`pearl-lightning`](https://github.com/kingonly/pearl-lightning) (Lightning on Pearl). pearl-dex reuses pearl-swap's proven taproot atomic-swap settlement core, refactored from an LP counterparty into a pure non-custodial coordinator of two user wallets.
 
@@ -14,7 +15,7 @@ A **trustless, non-custodial, peer-to-peer exchange** between **Pearl (PRL)** an
 Settlement core + the free-option bond + the P2P coordinator are built and tested (23 tests, typecheck clean).
 
 - **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the new secret-tied `Bond`; the `SwapPlan` two-user layout; the operator `Fee` + signed `OrderIntent`s; and the **P2P coordinator** — a crash-safe, idempotent, fee-bumped (RBF) state machine (`SwapExecutor` + `SwapStore`) that drives one party's side of a swap to completion. E2E coverage runs two executors (taker + maker) concurrently against scripted in-memory chains with real transaction construction: happy path, taker walk → maker forfeit, counterparty-no-fund → taker refund + bond reclaim, mid-flight restart/resume, and an RBF fee bump.
-- **Next:** the matching/relay server (intent crossing + ws relay + flat-file registry — the operator-side service that feeds agreed terms into two parties' executors), the maker commitment bond (closes the documented forfeit-griefing gap), live simnet/signet E2E, then the OP_CAT covenant spike. See `DESIGN.md` §9.
+- **Next:** the matching/relay server (intent crossing + ws relay + flat-file registry — the operator-side service that feeds agreed terms into two parties' executors, and makes the soft fee real via the LP registry), the maker commitment bond (closes the documented forfeit-griefing gap), then live simnet/signet E2E. The `OP_CAT` covenant is demoted to an optional later PoC, not a dependency. See `DESIGN.md` §9.
 
 **Read [`DESIGN.md`](./DESIGN.md) for the protocol** and [`MATURITY.md`](./MATURITY.md) for an honest, layer-by-layer assessment of what is battle-tested vs. novel vs. experimental.
 
