@@ -12,10 +12,10 @@ A **trustless, non-custodial, peer-to-peer exchange** between **Pearl (PRL)** an
 
 ## Status
 
-Settlement core + the free-option bond + the P2P coordinator + the matching/relay layer are built and tested (38 tests, typecheck clean).
+All three layers are built and tested end-to-end (40 tests, typecheck clean): a user posts a signed order and the swap settles on-chain, with the operator never touching funds.
 
-- **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the secret-tied `Bond`; the `SwapPlan` two-user layout; the operator `Fee` + signed `OrderIntent`s; the **P2P coordinator** — a crash-safe, idempotent, fee-bumped (RBF) state machine (`SwapExecutor` + `SwapStore`); and the **matching/relay layer** — the crossing matcher (`OrderBook`, price-time priority, partial fills, fee/expiry/signature gates), the settlement handshake that turns a match into agreed swap terms (`Handshake`), the transport-abstracted relay (`RelayServer`), and the flat-file discovery registry (`FileRegistry`). A relay E2E drives the **whole pipe** — two parties post crossing signed intents → the relay matches them → they run the handshake *through* the relay → both derive byte-identical swap terms → their `SwapExecutor`s settle the atomic swap end-to-end — alongside coordinator E2Es (happy path, taker walk → maker forfeit, counterparty-no-fund → refund + bond reclaim, restart/resume, RBF bump).
-- **Next:** a real WebSocket adapter over `RelayServer`; a `SwapClient` that ties relay + handshake + executor together; the third-party LP daemon (repackaged pearl-swap orchestrator); the maker commitment bond (closes the documented forfeit-griefing gap); then real `ChainClient`/`SwapWallet` impls + live simnet/signet E2E. The `OP_CAT` covenant remains an optional later PoC, not a dependency. See `DESIGN.md` §9.
+- **Done:** ported atomic-swap primitives (`SwapTree`, `Timelocks`, `Funder`, `ChainClient`); the secret-tied `Bond`; the `SwapPlan` two-user layout; the operator `Fee` + signed `OrderIntent`s; the **P2P coordinator** — a crash-safe, idempotent, fee-bumped (RBF) state machine (`SwapExecutor` + `SwapStore`); the **matching/relay layer** — crossing matcher (`OrderBook`, price-time priority, partial fills, fee/expiry/signature gates), settlement handshake (`Handshake`), transport-abstracted relay (`RelayServer`), flat-file discovery registry (`FileRegistry`); and the **per-user client** (`SwapClient`) — the one object a user runs, tying relay + handshake + executor together with crash-recovery (`resume()`). A client E2E drives the **whole pipe**: two `SwapClient`s post crossing signed orders → the relay matches them → they run the handshake *through* the relay → both derive byte-identical terms → their executors settle the atomic swap on-chain (the maker learns the preimage from the chain). Plus coordinator E2Es (taker walk → maker forfeit, counterparty-no-fund → refund + bond reclaim, restart/resume, RBF bump) and matcher/handshake/registry unit tests.
+- **Next:** a real WebSocket adapter over `RelayServer` (the relay logic is done; this is socket plumbing); reference `SwapWallet` impls (BTC + PRL UTXO selection) and real `PearlClient`/`BitcoinClient` `ChainClient`s, then a live simnet/signet run; the third-party LP daemon (repackaged pearl-swap orchestrator); the maker commitment bond (closes the documented forfeit-griefing gap). The `OP_CAT` covenant remains an optional later PoC, not a dependency. See `DESIGN.md` §9.
 
 **Read [`DESIGN.md`](./DESIGN.md) for the protocol** and [`MATURITY.md`](./MATURITY.md) for an honest, layer-by-layer assessment of what is battle-tested vs. novel vs. experimental.
 
@@ -25,7 +25,7 @@ Settlement core + the free-option bond + the P2P coordinator + the matching/rela
 |---|---|---|
 | `src/coordination` | Signed intents, the crossing matcher (`OrderBook`), settlement handshake, relay (`RelayServer`), discovery registry, and the per-user swap coordinator (`SwapExecutor` + `SwapStore`) | none |
 | `src/settlement` | Cross-chain atomic swap + bonds (ported/refactored from pearl-swap) | none — funds locked in user-controlled HTLCs |
-| `src/client` | Per-user wallet that custodies keys and executes its leg | self-custody |
+| `src/client` | `SwapClient` — the one object a user runs: posts intents, runs the handshake, drives its executor; custodies its keys + wallet | self-custody |
 | `src/common` | Shared types, Pearl/BTC network params, tapscript helpers | — |
 
 ## Stack
